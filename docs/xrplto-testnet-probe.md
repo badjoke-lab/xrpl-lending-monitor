@@ -1,6 +1,6 @@
 # XRPL.to Testnet qualification
 
-Status: **X1/X2/X3 evidence collected; keyed/Partner qualification pending**  
+Status: **X1–X4 Free-key evidence collected; Partner qualification pending**  
 Lane issue: **#1740**  
 Runtime effect: **none**
 
@@ -8,41 +8,26 @@ Runtime effect: **none**
 
 This lane evaluates XRPL.to independently from the active direct-XRPL Devnet runtime.
 
-It answers three questions before any provider integration is considered:
+It asks whether XRPL.to can preserve the repository's validated-ledger semantics, whether its read path can support bounded catch-up and state traversal, and whether it is competitive enough to become a future Mainnet provider.
 
-1. Can XRPL.to Testnet return the validated-ledger shapes required by the existing collector?
-2. Do those responses normalize to the same canonical semantics as an independent direct XRPL Testnet source?
-3. What throughput is available before keyed/Partner access?
-
-This evidence does not modify the D3/D4 active channels and does not make XRPL.to a production dependency.
+Nothing in this lane changes the active D3/D4 Devnet channels or makes XRPL.to a canonical runtime dependency.
 
 ## X1 — Transport and API compatibility
 
-Final X1 evidence is included in Actions run `37262172730`.
+Initial qualification evidence: Actions run `37262172730`.
 
 Observed successfully through `https://api.xrpl.to/v1/testnet`:
 
-- fixtures;
-- health;
+- fixtures and health;
 - `server_info`;
 - `feature`;
 - exact validated `ledger` with `transactions=true` and `expand=true`;
-- two sequential `ledger_data` pages with opaque string markers;
+- `ledger_data` marker pagination;
 - type-filtered `ledger_data` requests for `Vault`, `LoanBroker`, and `Loan`.
 
-The expanded-ledger response contained full transaction entries with:
+The expanded-ledger response contains the shapes already understood by the repository parser, including `tx_json`, `meta`, transaction hash, ledger identity, and validation state.
 
-- `tx_json`;
-- `meta`;
-- transaction hash;
-- ledger hash/index;
-- validation state.
-
-At ledger `21,289,323`, all 12 transactions were expanded; no hash-only entries were returned.
-
-The two generic `ledger_data` pages each returned 64 rows and a continuation marker.
-
-The first typed page for each of `Vault`, `LoanBroker`, and `Loan` returned zero matching rows but still returned a marker. This is **not** an exhaustive proof that Testnet contains zero such objects.
+The first request using Node's generic default User-Agent received a non-JSON HTTP 403. Supplying a descriptive project User-Agent resolved the observed transport failure.
 
 ### Observed Testnet amendment state
 
@@ -55,54 +40,38 @@ The X1 `feature` response reported:
 - `MPTokensV1`: supported=true, enabled=true;
 - `PriceOracle`: supported=true, enabled=true.
 
-No Lending/Vault fixture was found in the 97-entry Testnet fixture catalogue, so `vault_info` could not be meaningfully exercised against a known live Vault in this lane.
-
-### Transport hardening observation
-
-The first Actions request to the Testnet fixtures endpoint returned HTTP 403 with a non-JSON body when Node's default request headers were used.
-
-After the probe supplied an explicit project User-Agent, the same endpoint and subsequent Testnet requests succeeded.
-
-This is recorded as an observed operational compatibility requirement, not as an XRPL.to documented contract.
+No live Lending/Vault fixture was available. Therefore Lending-specific live-object parity remains unqualified on this Testnet even though generic validated-ledger parity is well proven.
 
 ## X2 — Canonical parser parity
 
 Actions run: `37262008027`
 
-The parity probe reuses the repository's existing:
+The probe reused:
 
 `src/collector/incremental/validated-ledger-parser.ts`
 
-No second ledger parser was introduced.
+Exact ledger:
 
-Exact ledger compared:
+- ledger `21,289,389`;
+- direct comparison source `https://s.altnet.rippletest.net:51234/`;
+- 24 transactions on both paths.
 
-- ledger: `21,289,389`;
-- XRPL.to latest observed at probe time: `21,289,394`;
-- independent direct source: `https://s.altnet.rippletest.net:51234/`.
+Equal on both paths:
 
-Results:
+- ledger index;
+- ledger hash;
+- parent hash;
+- close time;
+- transaction count and transaction-hash order;
+- canonical normalized semantic SHA-256.
 
-- ledger index: equal;
-- ledger hash: equal;
-- parent hash: equal;
-- close time: equal;
-- transaction count: `24 / 24`;
-- transaction-hash order: equal;
-- canonical normalized semantic SHA-256: equal.
-
-Semantic SHA-256 on both paths:
+Semantic SHA-256:
 
 `6c68c0566650e1abdae8d84c31ff24c0496544da458df5ed5740b92e2922a932`
 
-Observed single-ledger latency in this run:
+Result: **PASS**.
 
-- XRPL.to: `643.496 ms`;
-- direct Testnet: `407.816 ms`.
-
-One sample is not a performance conclusion.
-
-## X3 — Pre-key contiguous benchmark
+## X3 — Anonymous contiguous benchmark
 
 Actions run: `37262172730`
 
@@ -110,123 +79,239 @@ Range:
 
 `21,289,399 → 21,289,428`
 
-Thirty contiguous ledgers were read from both XRPL.to and the independent direct Testnet source and normalized through the same canonical parser.
+Results:
+
+- 30 contiguous ledgers;
+- 412 transactions per path;
+- semantic mismatches: `0`;
+- all canonical semantic digests equal.
+
+Anonymous XRPL.to was deliberately paced to avoid overrunning the no-key request window:
+
+- wall time: `76,675.725 ms`;
+- effective rate: `0.391 req/s`;
+- p50: `474.281 ms`;
+- p95: `701.143 ms`.
+
+Direct Testnet with a window of 16:
+
+- wall time: `1,257.545 ms`;
+- effective rate: `23.856 req/s`.
+
+This was not treated as a Partner-tier comparison.
+
+## X4 — Free-key bounded catch-up
+
+The repository secret `XRPLTO_API_KEY` is used only in the `X-Api-Key` request header. It is not written to logs or evidence artifacts.
+
+### X4a — 100-ledger keyed run
+
+Actions run: `37629991522`
+
+XRPL.to used a bounded read window of 4; the direct comparison path used the existing window of 16.
 
 Results:
 
-- ledgers compared: `30`;
+- ledgers compared: `100`;
 - semantic mismatches: `0`;
-- all canonical semantic digests equal: `true`;
-- transactions compared in aggregate: `412` on each path.
+- aggregate transactions: `1,477` on each path.
 
-Combined with X2, this provides **31 unique exact-ledger semantic comparisons with zero observed mismatches**.
+XRPL.to:
 
-### Anonymous XRPL.to measurements
+- wall time: `15,533.592 ms`;
+- effective rate: `6.438 req/s`;
+- p50: `490.055 ms`;
+- p95: `691.228 ms`;
+- mean: `512.470 ms`.
 
-The anonymous path was intentionally paced at 2.1 seconds between requests to stay within the observed/documented no-key request window.
+Direct:
 
-Measured:
+- wall time: `2,884.823 ms`;
+- effective rate: `34.664 req/s`;
+- p50: `84.574 ms`;
+- p95: `1,021.364 ms`;
+- mean: `214.473 ms`.
 
-- 30-ledger wall time: `76,675.725 ms`;
-- effective rate: `0.391 req/s`;
-- latency min: `299.551 ms`;
-- p50: `474.281 ms`;
-- p95: `701.143 ms`;
-- max: `831.334 ms`;
-- mean: `515.811 ms`;
-- response bytes: `1,002,196`;
-- transactions: `412`.
+Result: **PASS for correctness; XRPL.to Free-key is materially slower for catch-up.**
 
-Final observed rate-limit headers included:
+### X4b — 1,000-ledger keyed run
 
-- `x-ratelimit-limit: 30`;
-- `x-ratelimit-reset: 60`;
-- `x-ratelimit-daily-remaining: 290`.
+Actions run: `37630202743`
 
-### Direct Testnet comparison
+Range:
 
-The direct path used the existing production-shaped concurrent read style with a window of 16.
+`21,350,257 → 21,351,256`
 
-Measured:
+Results:
 
-- 30-ledger wall time: `1,257.545 ms`;
-- effective rate: `23.856 req/s`;
-- latency min: `81.756 ms`;
-- p50: `330.839 ms`;
-- p95: `851.068 ms`;
-- max: `926.214 ms`;
-- mean: `407.754 ms`;
-- response bytes: `995,506`;
-- transactions: `412`.
+- ledgers compared: `1,000`;
+- aggregate transactions: `13,750` on each path;
+- semantic mismatches: `0`;
+- all semantic digests equal.
 
-The wall-time comparison is intentionally **not** treated as evidence that Partner-tier XRPL.to is slower: the anonymous XRPL.to lane was rate-limited and serialized, while the direct lane used a 16-read window.
+XRPL.to, window 4:
+
+- wall time: `181,585.062 ms` (~3.03 minutes);
+- effective rate: `5.507 req/s`;
+- p50: `533.969 ms`;
+- p95: `711.579 ms`;
+- mean: `576.149 ms`;
+- response bytes: `35,083,241`.
+
+Direct, window 16:
+
+- wall time: `8,609.289 ms`;
+- effective rate: `116.154 req/s`;
+- p50: `53.613 ms`;
+- p95: `56.899 ms`;
+- mean: `62.878 ms`;
+- response bytes: `34,860,241`.
+
+Observed XRPL.to response headers at the end of the run included:
+
+- `x-ratelimit-limit: 20`;
+- `x-ratelimit-remaining: 12`;
+- `x-ratelimit-reset: 1`;
+- `x-ratelimit-daily-remaining: 31999`.
+
+The `20` header is treated as an observed short-window/burst value, not as proof of the plan's sustained request rate.
+
+Result: **PASS for correctness and bounded completion. Free-key XRPL.to is not competitive with direct Testnet for high-throughput catch-up.**
+
+## X4 — ledger_data parity and throughput
+
+### JSON traversal
+
+Actions run: `37631052669`
+
+Target ledger: `21,351,368`  
+Mode: `binary=false`, page limit `256`, 100 pages.
+
+Both paths returned:
+
+- 100 pages;
+- 25,600 rows;
+- the same continuation marker after page 100;
+- the same ledger hash;
+- the same first and last object index;
+- the same canonical row digest.
+
+XRPL.to:
+
+- wall time: `83,136.231 ms`;
+- rows/sec: `307.928`;
+- p50: `571.276 ms`;
+- p95: `845.154 ms`.
+
+Direct:
+
+- wall time: `4,710.027 ms`;
+- rows/sec: `5,435.213`;
+- p50: `24.322 ms`;
+- p95: `26.603 ms`.
+
+Result: **PASS for parity; JSON bulk traversal is too slow to prefer over direct.**
+
+### Binary traversal
+
+Actions run: `37631531542`
+
+Target ledger: `21,351,432`  
+Mode: `binary=true`, page limit `2048`, 100 pages.
+
+Both paths returned:
+
+- 100 pages;
+- 204,800 rows;
+- the same continuation marker;
+- the same ledger hash;
+- the same first and last object index;
+- the same canonical binary-row digest.
+
+Digest:
+
+`9ef43fc9eef43a1377c4e222210d6b50ec95f5e232420d51f6fdc2f45991057c`
+
+XRPL.to:
+
+- wall time: `76,614.411 ms`;
+- rows/sec: `2,673.126`;
+- p50: `508.661 ms`;
+- p95: `1,166.503 ms`;
+- response bytes: `62,131,768`.
+
+Direct:
+
+- wall time: `19,655.368 ms`;
+- rows/sec: `10,419.545`;
+- p50: `97.740 ms`;
+- p95: `103.335 ms`;
+- response bytes: `62,108,958`.
+
+Result: **PASS for parity. Binary traversal is the only credible XRPL.to bulk-scan candidate observed so far, but the Free-key path remained about 3.9x slower by wall time than direct in this bounded sample.**
+
+Neither JSON nor binary run exhausted the full Testnet state within the 100-page bound. They are bounded throughput/parity measurements, not complete-ledger traversals.
 
 ## Current classification
 
 **SECONDARY / PARTNER-GATED**
 
-Reason:
+Evidence now supports all of the following:
 
-- transport compatibility: PASS;
-- generic validated-ledger parser compatibility: PASS;
-- exact semantic parity: PASS on 31 unique ledgers observed so far;
-- anonymous catch-up throughput: insufficient for production-shaped catch-up;
-- keyed/Partner throughput: unmeasured;
-- 100-ledger catch-up: unqualified;
-- 1,000-ledger catch-up: unqualified;
-- Lending-specific live-object parity: currently unqualified because the observed XRPL.to Testnet has Lending/Vault amendments disabled and no live fixture was available;
-- redistribution/attribution permission: still a separate activation gate.
+- transport/API compatibility: PASS;
+- canonical validated-ledger parser compatibility: PASS;
+- 100-ledger Free-key catch-up parity: PASS;
+- 1,000-ledger Free-key catch-up parity: PASS;
+- 1,000-ledger run semantic mismatches: `0`;
+- JSON `ledger_data` parity across 25,600 rows: PASS;
+- binary `ledger_data` parity across 204,800 rows: PASS;
+- Free-key throughput: materially slower than the independent direct Testnet source;
+- Lending-specific live-object parity: still unavailable because the observed Testnet has Lending/Vault amendments disabled;
+- Partner-tier throughput: unmeasured;
+- redistribution permission: not yet obtained.
 
-This classification is not `PRIMARY_CANDIDATE`.
+Therefore XRPL.to is **not** promoted to `PRIMARY_CANDIDATE` from Free-key evidence.
 
-## Keyed-access contract
+It is technically credible as a secondary/fallback provider and is semantically compatible with the current parser over the tested data.
 
-The current XRPL.to documentation specifies API-key use as:
+## Bulk-read implication
 
-`X-Api-Key: xrpl_…`
+If XRPL.to is later qualified for a Mainnet/base-building role, `ledger_data binary=true` plus local decode should be the first bulk-read design tested.
 
-The key can be created from the dashboard or through `POST /v1/keys` with an XRPL wallet signature. The returned API key is shown once and must be saved by the operator.
+The observed page capacity was eight times the JSON limit used in this qualification (2048 versus 256), and XRPL.to throughput improved from about 308 rows/sec to about 2,673 rows/sec.
 
-This lane now contains a **manual-only** keyed benchmark workflow:
+This is an optimization candidate only. It does not change the current Devnet collector.
 
-`.github/workflows/xrplto-keyed-benchmark.yml`
+## Workflows after qualification
 
-It reads only the GitHub Actions secret:
+To avoid accidental credit/request consumption, the qualification workflows are manual-only after the evidence runs:
 
-`XRPLTO_API_KEY`
+- `.github/workflows/xrplto-testnet-probe.yml`
+- `.github/workflows/xrplto-keyed-benchmark.yml`
+- `.github/workflows/xrplto-ledger-data-benchmark.yml`
 
-The key is sent only in the `X-Api-Key` request header and is not written to evidence artifacts.
+## Remaining gates
 
-The manual benchmark defaults to:
+The next useful XRPL.to evidence is no longer another Free-key benchmark.
 
-- 100 contiguous ledgers;
-- 125 ms request spacing, below the documented Free-key 10 req/s limit.
+Remaining gates are:
 
-A 1,000-ledger option is also available. Tighter spacing must not be used merely to force a rate-limit test; it is appropriate only after the key's actual tier/limits are known.
+1. Partner application and approval;
+2. a valid public attribution/credit URL for the Partner review;
+3. explicit written permission for any planned stored-data redistribution that falls under XRPL.to's restriction;
+4. Partner-tier rerun of bounded 100/1,000-ledger catch-up with a higher, policy-compliant read window;
+5. Partner-tier binary `ledger_data` benchmark;
+6. future Mainnet qualification before any canonical provider role;
+7. Lending-specific parity once a network/provider combination exposes active Lending/Vault data.
 
-Official references:
-
-- https://xrpl.to/docs/api-keys
-- https://xrpl.to/docs/subscriptions
-
-## Next qualification gate
-
-Do not broaden the anonymous benchmark further merely to spend daily request allowance.
-
-The next useful evidence requires keyed/Partner access:
-
-1. create a project-scoped XRPL.to API key and store it as the GitHub Actions secret `XRPLTO_API_KEY`;
-2. run the manual 100-ledger keyed benchmark;
-3. if that passes, run the 1,000-ledger keyed benchmark;
-4. measure 100-ledger and 1,000-ledger bounded catch-up;
-5. measure keyed `ledger_data` traversal behavior;
-6. record 429 / `Retry-After` behavior without intentionally violating provider policy;
-7. classify as `REJECT`, `SECONDARY`, or `PRIMARY_CANDIDATE`.
-
-Public stored XRPL.to-backed artifacts remain prohibited until the separate redistribution/attribution gate is satisfied.
+No public XRPL.to-backed canonical artifacts are activated by this work.
 
 ## Evidence links
 
-- X1/X2/X3 qualification run: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/37262172730
-- X2 parity run: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/37262008027
+- X1/X3 qualification: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/37262172730
+- X2 exact parity: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/37262008027
+- X4 keyed 100-ledger: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/37629991522
+- X4 keyed 1,000-ledger: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/37630202743
+- X4 JSON ledger_data: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/37631052669
+- X4 binary ledger_data: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/37631531542
 - lane issue: https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1740
