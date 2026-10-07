@@ -1,11 +1,6 @@
 name: XRPL.to keyed benchmark
 
 on:
-  push:
-    branches:
-      - research/xrplto-testnet-probe-x1-20261005
-    paths:
-      - '.github/workflows/xrplto-keyed-benchmark.yml'
   workflow_dispatch:
     inputs:
       sample_ledgers:
@@ -62,7 +57,7 @@ jobs:
       - name: Run keyed bounded benchmark
         env:
           XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
-          XRPLTO_SAMPLE_LEDGERS: ${{ inputs.sample_ledgers || '1000' }}
+          XRPLTO_SAMPLE_LEDGERS: ${{ inputs.sample_ledgers || '100' }}
           XRPLTO_SPACING_MS: ${{ inputs.spacing_ms || '0' }}
           XRPLTO_WINDOW: ${{ inputs.xrplto_window || '4' }}
           XRPLTO_BENCHMARK_OUTPUT_DIR: .local/xrplto-testnet-keyed-benchmark
@@ -83,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: xrplto-testnet-keyed-benchmark-${{ inputs.sample_ledgers || '1000' }}
+          name: xrplto-testnet-keyed-benchmark-${{ inputs.sample_ledgers || '100' }}
           path: .local/xrplto-testnet-keyed-benchmark
           if-no-files-found: error
           retention-days: 30
