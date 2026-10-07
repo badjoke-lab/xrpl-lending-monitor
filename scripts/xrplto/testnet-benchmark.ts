@@ -15,6 +15,10 @@ const XRPLTO_SPACING_MS = Number.parseInt(
   process.env.XRPLTO_SPACING_MS || (XRPLTO_API_KEY ? '0' : '2100'),
   10,
 )
+const XRPLTO_WINDOW = Number.parseInt(
+  process.env.XRPLTO_WINDOW || (XRPLTO_API_KEY ? '4' : '1'),
+  10,
+)
 const DIRECT_WINDOW = 16
 const USER_AGENT =
   'xrpl-lending-monitor-xrplto-benchmark/1.0 (+https://github.com/badjoke-lab/xrpl-lending-monitor)'
@@ -24,6 +28,9 @@ if (!Number.isSafeInteger(SAMPLE_LEDGERS) || SAMPLE_LEDGERS < 1 || SAMPLE_LEDGER
 }
 if (!Number.isSafeInteger(XRPLTO_SPACING_MS) || XRPLTO_SPACING_MS < 0) {
   throw new Error('XRPLTO_SPACING_MS must be a non-negative integer')
+}
+if (!Number.isSafeInteger(XRPLTO_WINDOW) || XRPLTO_WINDOW < 1 || XRPLTO_WINDOW > 16) {
+  throw new Error('XRPLTO_WINDOW must be an integer from 1 through 16')
 }
 
 interface RpcRead {
@@ -246,19 +253,30 @@ async function readXrplToRange(indexes: readonly number[]) {
   const started = performance.now()
   let lastHeaders: Record<string, string> = {}
 
-  for (let i = 0; i < indexes.length; i += 1) {
-    if (i > 0 && XRPLTO_SPACING_MS > 0) await sleep(XRPLTO_SPACING_MS)
-    const ledgerIndex = indexes[i]
-    if (ledgerIndex === undefined) throw new Error('Missing XRPL.to ledger index')
-    const read = await xrplToRpc('ledger', {
-      ledger_index: ledgerIndex,
-      transactions: true,
-      expand: true,
-      owner_funds: false,
-    })
-    lastHeaders = read.headers
-    reads.push(measurement(XRPLTO_RPC, ledgerIndex, read))
+  for (let offset = 0; offset < indexes.length; offset += XRPLTO_WINDOW) {
+    if (offset > 0 && XRPLTO_SPACING_MS > 0) await sleep(XRPLTO_SPACING_MS)
+    const window = indexes.slice(offset, offset + XRPLTO_WINDOW)
+    const results = await Promise.all(
+      window.map(async (ledgerIndex) => {
+        const read = await xrplToRpc('ledger', {
+          ledger_index: ledgerIndex,
+          transactions: true,
+          expand: true,
+          owner_funds: false,
+        })
+        return {
+          measurement: measurement(XRPLTO_RPC, ledgerIndex, read),
+          headers: read.headers,
+        }
+      }),
+    )
+    for (const result of results) {
+      lastHeaders = result.headers
+      reads.push(result.measurement)
+    }
   }
+
+  reads.sort((left, right) => left.ledgerIndex - right.ledgerIndex)
 
   return {
     reads,
@@ -359,6 +377,7 @@ async function main() {
     xrplTo: {
       auth: XRPLTO_API_KEY ? 'api-key' : 'anonymous/no-key',
       intentionalSpacingMs: XRPLTO_SPACING_MS,
+      readWindow: XRPLTO_WINDOW,
       ...stats(xrplTo.reads, xrplTo.wallMs),
       finalRateLimitHeaders: xrplTo.finalRateLimitHeaders,
     },
@@ -399,6 +418,7 @@ async function main() {
     `- range: \`${startLedger} → ${endLedger}\` (${SAMPLE_LEDGERS} ledgers)`,
     `- semantic mismatches: \`${mismatches.length}\``,
     `- XRPL.to auth: \`${summary.xrplTo.auth}\``,
+    `- XRPL.to read window: \`${summary.xrplTo.readWindow}\``,
     `- XRPL.to wall time: \`${summary.xrplTo.wallMs} ms\``,
     `- XRPL.to p50/p95: \`${summary.xrplTo.latencyMs.p50} / ${summary.xrplTo.latencyMs.p95} ms\``,
     `- XRPL.to effective rate: \`${summary.xrplTo.requestsPerSecond} req/s\``,
