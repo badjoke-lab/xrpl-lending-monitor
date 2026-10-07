@@ -1,8 +1,27 @@
-import { XrplJsonRpcClient, type FetchLike } from '../network/xrpl-rpc'
+import { DirectXrplReadProvider, type XrplReadProvider } from '../network/xrpl-read-provider'
+import { type FetchLike } from '../network/xrpl-rpc'
 import {
   parseValidatedLedgerResult,
   type ValidatedLedgerRead,
 } from './validated-ledger-parser'
+
+export async function readValidatedLedgerFromProvider(options: {
+  provider: XrplReadProvider
+  ledgerIndex: number
+}): Promise<ValidatedLedgerRead> {
+  const result = await options.provider.call<Record<string, unknown>>('ledger', {
+    ledger_index: options.ledgerIndex,
+    transactions: true,
+    expand: true,
+    owner_funds: false,
+  })
+
+  return parseValidatedLedgerResult({
+    endpoint: options.provider.endpoint,
+    requestedLedgerIndex: options.ledgerIndex,
+    result,
+  })
+}
 
 export async function readValidatedLedger(options: {
   endpoint: string
@@ -10,20 +29,13 @@ export async function readValidatedLedger(options: {
   timeoutMs: number
   fetcher?: FetchLike
 }): Promise<ValidatedLedgerRead> {
-  const client = new XrplJsonRpcClient({
+  const provider = new DirectXrplReadProvider({
     endpoint: options.endpoint,
     timeoutMs: options.timeoutMs,
     fetcher: options.fetcher,
   })
-  const result = await client.call<Record<string, unknown>>('ledger', {
-    ledger_index: options.ledgerIndex,
-    transactions: true,
-    expand: true,
-    owner_funds: false,
-  })
-  return parseValidatedLedgerResult({
-    endpoint: options.endpoint,
-    requestedLedgerIndex: options.ledgerIndex,
-    result,
+  return readValidatedLedgerFromProvider({
+    provider,
+    ledgerIndex: options.ledgerIndex,
   })
 }
