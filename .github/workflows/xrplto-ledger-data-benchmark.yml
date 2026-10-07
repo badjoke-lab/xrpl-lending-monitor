@@ -26,6 +26,15 @@ on:
           - '64'
           - '128'
           - '256'
+          - '2048'
+      binary:
+        description: Request binary ledger entries
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: read
@@ -58,7 +67,8 @@ jobs:
         env:
           XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
           XRPLTO_LEDGER_DATA_PAGES: ${{ inputs.pages || '100' }}
-          XRPLTO_LEDGER_DATA_LIMIT: ${{ inputs.page_limit || '256' }}
+          XRPLTO_LEDGER_DATA_LIMIT: ${{ inputs.page_limit || '2048' }}
+          XRPLTO_LEDGER_DATA_BINARY: ${{ inputs.binary || 'true' }}
           XRPLTO_LEDGER_DATA_OUTPUT_DIR: .local/xrplto-ledger-data-benchmark
         run: node .xrplto-ledger-data-benchmark-build/testnet-ledger-data-benchmark.mjs
 
