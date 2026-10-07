@@ -42,7 +42,7 @@ describe('XRPL read providers', () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers)
       expect(headers.get('user-agent')).toBe('xrpl-lending-monitor-shadow/1.0')
-      expect(headers.get('x-api-key')).toBe('xrpl_secret_value')
+      expect(headers.get('x-api-key')).toBe('TEST_API_KEY')
 
       const body = JSON.parse(String(init?.body))
       expect(body).toEqual({
@@ -53,7 +53,7 @@ describe('XRPL read providers', () => {
           expand: true,
         },
       })
-      expect(String(init?.body)).not.toContain('xrpl_secret_value')
+      expect(String(init?.body)).not.toContain('TEST_API_KEY')
 
       return new Response(JSON.stringify({
         success: true,
@@ -69,7 +69,7 @@ describe('XRPL read providers', () => {
     const provider = new XrplToReadProvider({
       endpoint: 'https://api.xrpl.to/v1/testnet/rpc',
       timeoutMs: 1000,
-      apiKey: ' xrpl_secret_value ',
+      apiKey: ' TEST_API_KEY ',
       userAgent: 'xrpl-lending-monitor-shadow/1.0',
       fetcher,
     })
@@ -89,7 +89,7 @@ describe('XRPL read providers', () => {
     const provider = new XrplToReadProvider({
       endpoint: 'https://api.xrpl.to/v1/testnet/rpc',
       timeoutMs: 1000,
-      apiKey: 'xrpl_secret_value',
+      apiKey: 'TEST_API_KEY',
       userAgent: 'xrpl-lending-monitor-shadow/1.0',
       fetcher: vi.fn(async () => new Response('rate limited', {
         status: 429,
