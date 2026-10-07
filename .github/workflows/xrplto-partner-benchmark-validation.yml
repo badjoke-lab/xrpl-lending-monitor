@@ -1,0 +1,40 @@
+name: XRPL.to Partner benchmark validation
+
+on:
+  push:
+    branches:
+      - research/xrplto-partner-benchmark-20261007
+    paths:
+      - '.github/workflows/xrplto-partner-benchmark-validation.yml'
+      - 'scripts/xrplto/**'
+      - 'vite.xrplto-partner-benchmark.config.ts'
+      - 'vite.xrplto-partner-ledger-data.config.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Check Partner preflight syntax
+        run: node --check scripts/xrplto/partner-preflight.mjs
+
+      - name: Build Partner catch-up benchmark
+        run: pnpm exec vite build --config vite.xrplto-partner-benchmark.config.ts
+
+      - name: Build Partner ledger_data benchmark
+        run: pnpm exec vite build --config vite.xrplto-partner-ledger-data.config.ts
+
+      - name: Typecheck repository
+        run: pnpm typecheck
