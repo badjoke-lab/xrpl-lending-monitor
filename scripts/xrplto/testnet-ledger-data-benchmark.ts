@@ -10,6 +10,7 @@ const OUTPUT_DIR =
 const API_KEY = process.env.XRPLTO_API_KEY?.trim() || ''
 const MAX_PAGES = Number.parseInt(process.env.XRPLTO_LEDGER_DATA_PAGES || '100', 10)
 const PAGE_LIMIT = Number.parseInt(process.env.XRPLTO_LEDGER_DATA_LIMIT || '256', 10)
+const BINARY = process.env.XRPLTO_LEDGER_DATA_BINARY === 'true'
 const TIMEOUT_MS = 20_000
 const USER_AGENT =
   'xrpl-lending-monitor-xrplto-ledger-data/1.0 (+https://github.com/badjoke-lab/xrpl-lending-monitor)'
@@ -198,7 +199,7 @@ async function traverse(options: {
   while (pages < MAX_PAGES) {
     const params: Record<string, unknown> = {
       ledger_index: options.ledgerIndex,
-      binary: false,
+      binary: BINARY,
       limit: PAGE_LIMIT,
     }
     if (marker !== undefined && marker !== null) params.marker = marker
@@ -300,6 +301,7 @@ async function main() {
     completedAt: new Date().toISOString(),
     targetLedger,
     pageLimit: PAGE_LIMIT,
+    binary: BINARY,
     maxPages: MAX_PAGES,
     xrplTo,
     direct,
@@ -327,6 +329,7 @@ async function main() {
     `- pass: **${summary.pass ? 'YES' : 'NO'}**`,
     `- target ledger: \`${targetLedger}\``,
     `- page limit: \`${PAGE_LIMIT}\``,
+    `- binary: \`${BINARY}\``,
     `- max pages: \`${MAX_PAGES}\``,
     `- XRPL.to pages / rows: \`${xrplTo.pages} / ${xrplTo.rows}\``,
     `- direct pages / rows: \`${direct.pages} / ${direct.rows}\``,
