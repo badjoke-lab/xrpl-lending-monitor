@@ -6,6 +6,7 @@ on:
     paths:
       - 'src/shared/db-less/current-only-artifact.ts'
       - 'src/shared/db-less/current-only-artifact.test.ts'
+      - 'src/shared/db-less/current-only-live-sample.test.ts'
       - '.github/workflows/db-less-d5-current-only-artifact.yml'
 
 permissions:
@@ -31,5 +32,10 @@ jobs:
           pnpm exec eslint
           src/shared/db-less/current-only-artifact.ts
           src/shared/db-less/current-only-artifact.test.ts
+          src/shared/db-less/current-only-live-sample.test.ts
       - name: Verify Current-only provenance and negative cases
         run: pnpm exec vitest run src/shared/db-less/current-only-artifact.test.ts
+      - name: Read-only measurement of actual D3 Current-only asset
+        env:
+          RUN_D5_REAL_CURRENT_SAMPLE: 'true'
+        run: pnpm exec vitest run src/shared/db-less/current-only-live-sample.test.ts
