@@ -6,8 +6,10 @@ import {
   ProvenanceBadge,
   UnavailableBlock,
 } from '../components/DataDisplay'
+import { useApiResource } from '../hooks/useApiResource'
 import { useStaticVaultDetail } from '../hooks/useStaticVaultDetail'
 import { formatInteger, truncateMiddle } from '../lib/formatting'
+import type { VaultDetailResponse } from '../types/api'
 
 interface VaultDetailPageProps {
   vaultId: string
@@ -19,9 +21,19 @@ function amount(value: string | null, assetKey: string): string {
 }
 
 export function VaultDetailPage({ vaultId, onNavigate }: VaultDetailPageProps) {
-  const { resource, reload } = useStaticVaultDetail(vaultId)
-  const staticRead = resource.state === 'ready' ? resource.data : null
-  const response = staticRead?.response ?? null
+  const staticCandidate = import.meta.env.VITE_STATIC_CURRENT_ENABLED === 'true'
+  const staticResource = useStaticVaultDetail(staticCandidate ? vaultId : null)
+  const apiResource = useApiResource<VaultDetailResponse>(
+    staticCandidate ? null : `/api/vaults/${vaultId}`,
+  )
+  const resource = staticCandidate ? staticResource.resource : apiResource.resource
+  const reload = staticCandidate ? staticResource.reload : apiResource.reload
+  const staticRead = staticCandidate && staticResource.resource.state === 'ready'
+    ? staticResource.resource.data
+    : null
+  const response = staticCandidate
+    ? (staticRead?.response ?? null)
+    : (apiResource.resource.state === 'ready' ? apiResource.resource.data : null)
   const vault = response?.data ?? null
 
   return (
@@ -45,7 +57,9 @@ export function VaultDetailPage({ vaultId, onNavigate }: VaultDetailPageProps) {
           <p className="page-kicker">Vault detail</p>
           <h1 className="mono">{truncateMiddle(vaultId, 12)}</h1>
           <p className="page-summary">
-            Verified Devnet Vault state from public static artifacts. Missing coverage is reported rather than replaced with stale data.
+            {staticCandidate
+              ? 'Verified Devnet Vault state from public static artifacts; unavailable when coverage cannot be proven.'
+              : 'Current validated Vault state from the existing Devnet API. Static candidate cutover is not yet active.'}
           </p>
         </div>
         <div className="page-actions">
