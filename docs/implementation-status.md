@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-09-29
+Last updated: 2026-10-11
 
 ## Current decision
 
@@ -241,6 +241,12 @@ This proves recurrent compaction can read the fixed active checkpoint shard set 
 **D5 — Static UI cutover: active.**
 
 The D4 retention contract applies only to immutable Current overlay checkpoint Releases named `db-less-current-overlay-v1-<ledger>`. It keeps the active checkpoint plus two predecessors by default. Draft/non-prerelease checkpoints are protected, and a newer unactivated checkpoint causes planning to fail closed. D3 `db-less-live-data-v1-*` Releases are explicitly outside this retention contract because they carry History/live-chain evidence required by later stages. Actual Release deletion is not performed by the planner and remains a separate explicit mutation step.
+
+## D5 browser transport STOP/PIVOT (2026-10-11)
+
+D5 is **ACTIVE / BLOCKED**. Static Vault detail candidate code and build are implemented (#1754/#1755), but real Chromium read-only runs `38147825820` and `38148015580` proved that the public GitHub Release asset transport is not browser-readable from an independent static host: GitHub Release and API octet-stream redirect responses fail CORS, and the alternate REST Accept only returns asset metadata. The D3/D4 channel JSON API is readable; immutable D2/D4 asset bytes are not.
+
+The current design must NOT be promoted as a functional static UI or formal Devnet release. `VITE_STATIC_CURRENT_ENABLED` remains OFF in public operation. Source-of-truth proof: Issue #1739 CORS decision comment `6110163222`, free-tier envelope comment `6110185398`. D2 current base is 862,106,011 bytes (860 assets), D4 active checkpoint 177,191,267 bytes (257 assets); this excludes the tail and history. A new asset-delivery architecture must earn explicit real-browser SHA/size, bounded query, freshness and free-envelope proofs. D4 collector/compaction evidence remains independently valid; D5 blockage does not imply D1/Queue/Supabase recovery or XRPL.to is in scope.
 
 ## Release status
 

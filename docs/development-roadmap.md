@@ -170,6 +170,14 @@ Exit:
 - accessibility/responsive regression;
 - static deployment works with no canonical Worker/database.
 
+D5 browser transport STOP/PIVOT gate (2026-10-11):
+
+- real Chromium runs `38147825820` / `38148015580` failed to fetch D2 and D4 immutable GitHub Release assets from a separate static-site origin; browser console confirms missing CORS `Access-Control-Allow-Origin` headers;
+- GitHub API channel JSON remains readable, but the octet-stream asset endpoint redirects to the same CORS-blocked Release asset host, and the alternative REST media type returns metadata instead of immutable asset bytes;
+- therefore the implemented D2/D4 browser `GithubReleaseAssetResolver` strategy is NOT viable as-is. Do not turn on `VITE_STATIC_CURRENT_ENABLED` for public traffic merely because mock-based tests and Vite builds pass;
+- raw active D2 data is 862,106,011 bytes / 860 assets, and active D4 is 177,191,267 bytes / 257 assets, before UI, D3 tail, History, and retention predecessors. A naive entire-site static mirror is not a proven zero-cost fix;
+- D5 can proceed only after a new delivery path passes real browser bytes/digest tests, bounded read/freshness, retention/growth and free-tier measurements. Any runtime proxy or asset mirror is a separately justified architecture pivot. No fallback to old D1/Queue/Supabase recovery or XRPL.to.
+
 ## D6 — Legacy removal
 
 Scope:
