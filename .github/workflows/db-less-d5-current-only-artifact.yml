@@ -12,6 +12,7 @@ on:
       - 'src/shared/db-less/channel.ts'
       - 'src/shared/db-less/live-publication.ts'
       - 'src/shared/db-less/live-publication.test.ts'
+      - 'scripts/prepare-db-less-live-run.ts'
       - '.github/workflows/db-less-d5-current-only-artifact.yml'
 
 permissions:
@@ -28,6 +29,16 @@ jobs:
           node-version: '24.18.0'
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - name: Build D3 preparation CLI without running or publishing
+        run: pnpm build:db-less-live-run
+      - name: Confirm production D3 workflow has not opted in
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Fq -- '--enable-current-only-artifact' .github/workflows/db-less-d3-live-once.yml; then
+            echo 'Production D3 must remain opt-out during isolated qualification' >&2
+            exit 1
+          fi
       - name: Check shared and UI type contracts
         run: |
           pnpm exec tsc -p tsconfig.worker.json --noEmit
@@ -43,6 +54,7 @@ jobs:
           src/shared/db-less/channel.ts
           src/shared/db-less/live-publication.ts
           src/shared/db-less/live-publication.test.ts
+          scripts/prepare-db-less-live-run.ts
       - name: Verify Current-only provenance and negative cases
         run: pnpm exec vitest run src/shared/db-less/current-only-artifact.test.ts src/shared/db-less/current-only-tail-reader.test.ts src/shared/db-less/live-publication.test.ts src/shared/db-less/channel.test.ts
       - name: Read-only measurement of actual D3 Current-only asset
