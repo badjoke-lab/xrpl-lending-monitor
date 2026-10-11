@@ -1,0 +1,7 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xrpl-lending-d5-readonly-relay-spike",
+  "main": "src/edge/d5-readonly-release-relay-spike.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false
+}
