@@ -69,6 +69,7 @@ export default {
     // Browser consumer MUST verify the manifest-provided exact SHA-256 and byte count.
     const headers = new Headers({
       'access-control-allow-origin': '*',
+      'access-control-expose-headers': 'access-control-allow-origin, content-length',
       'x-content-type-options': 'nosniff',
       'content-type': 'application/octet-stream',
       'cache-control': 'public, max-age=3600',
