@@ -45,7 +45,8 @@ jobs:
           test "$(jq -r '.prerelease' .local/d5-static-current-readiness/d3-release.json)" = "true"
           test "$(jq -r '.prerelease' .local/d5-static-current-readiness/d4-release.json)" = "true"
 
-          jq -e '.base.generationId == input.active.baseIdentity and .epochId == input.epochId' "$d3" "$d4" >/dev/null
+          jq -en --slurpfile d3 "$d3" --slurpfile d4 "$d4" \
+            '$d3[0].base.generationId == $d4[0].active.baseIdentity and $d3[0].epochId == $d4[0].epochId' >/dev/null
 
           d3_head="$(jq -er '.lastCommittedLedgerIndex' "$d3")"
           d4_head="$(jq -er '.active.throughLedgerIndex' "$d4")"
