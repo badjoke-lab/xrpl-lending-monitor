@@ -6,6 +6,14 @@ const D3_CHANNEL_TAG = 'db-less-live-channel-candidate-v1'
 const D4_CHANNEL_TAG = 'db-less-current-overlay-channel-v1'
 
 test('real Chromium can read public Devnet channel and immutable Release assets without credentials', async ({ page }) => {
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      console.log('D5_BROWSER_CONSOLE=' + message.text())
+    }
+  })
+  page.on('requestfailed', (request) => {
+    console.log('D5_BROWSER_REQUEST_FAILED=' + request.url() + ' ' + (request.failure()?.errorText ?? 'unknown'))
+  })
   await page.goto('/')
   const result = await page.evaluate(async (input) => {
     const attempts: Array<{
@@ -76,6 +84,60 @@ test('real Chromium can read public Devnet channel and immutable Release assets 
       'D2 immutable base manifest',
       `https://github.com/${input.repository}/releases/download/${input.d2Tag}/base-manifest.json`,
     )
+
+    // GitHub API is CORS-readable: check whether its public asset endpoint
+    // actually serves the binary asset rather than asset metadata JSON.
+    const candidates: Array<{ tag: string; name: string }> = [
+      { tag: input.d2Tag, name: 'base-manifest.json' },
+    ]
+    if (d4Body) {
+      const channel = JSON.parse((JSON.parse(d4Body) as { body: string }).body) as {
+        active: { location: { releaseTag: string }; manifestKey: string }
+      }
+      candidates.push({
+        tag: channel.active.location.releaseTag,
+        name: channel.active.manifestKey,
+      })
+    }
+    for (const candidate of candidates) {
+      const metadata = await read('Release metadata for ' + candidate.tag, api(candidate.tag))
+      if (!metadata) continue
+      const release = JSON.parse(metadata) as {
+        assets: Array<{ name: string; id: number; size: number }>
+      }
+      const asset = release.assets.find((value) => value.name === candidate.name)
+      if (!asset) {
+        attempts.push({
+          name: 'Find Release asset ' + candidate.name,
+          url: api(candidate.tag), ok: false, status: null,
+          bytes: null, error: 'Asset metadata not found',
+        })
+        continue
+      }
+      for (const accept of ['application/octet-stream', 'application/vnd.github.raw+json']) {
+        const assetUrl = `https://api.github.com/repos/${input.repository}/releases/assets/${asset.id}`
+        try {
+          const response = await fetch(assetUrl, {
+            headers: { Accept: accept },
+            redirect: 'follow',
+          })
+          const bytes = await response.arrayBuffer()
+          const valid = response.ok && bytes.byteLength === asset.size
+          attempts.push({
+            name: candidate.name + ' via GitHub API asset ' + accept,
+            url: assetUrl, ok: valid,
+            status: response.status, bytes: bytes.byteLength,
+            error: valid ? null : `Expected ${asset.size} binary bytes, received ${bytes.byteLength}`,
+          })
+        } catch (error) {
+          attempts.push({
+            name: candidate.name + ' via GitHub API asset ' + accept,
+            url: assetUrl, ok: false, status: null, bytes: null,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+    }
     return attempts
   }, {
     repository: REPOSITORY,
