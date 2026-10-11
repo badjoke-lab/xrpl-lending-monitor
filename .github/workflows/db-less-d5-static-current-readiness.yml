@@ -1,0 +1,116 @@
+name: DB-less D5 static Current readiness
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: >-
+      github.event.issue.number == 1736 &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.body == '/d5-static-current-readiness'
+    concurrency:
+      group: db-less-d5-static-current-readiness
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      D3_CHANNEL_TAG: db-less-live-channel-candidate-v1
+      D4_CHANNEL_TAG: db-less-current-overlay-channel-v1
+    steps:
+      - name: Check frozen D3 / D4 channel coverage and freshness
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d5-static-current-readiness
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D3_CHANNEL_TAG" > .local/d5-static-current-readiness/d3-release.json
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D4_CHANNEL_TAG" > .local/d5-static-current-readiness/d4-release.json
+          jq -er '.body | fromjson' .local/d5-static-current-readiness/d3-release.json > .local/d5-static-current-readiness/d3-channel.json
+          jq -er '.body | fromjson' .local/d5-static-current-readiness/d4-release.json > .local/d5-static-current-readiness/d4-channel.json
+
+          d3=.local/d5-static-current-readiness/d3-channel.json
+          d4=.local/d5-static-current-readiness/d4-channel.json
+          test "$(jq -r '.network' "$d3")" = "devnet"
+          test "$(jq -r '.network' "$d4")" = "devnet"
+          test "$(jq -r '.schemaVersion' "$d3")" = "1"
+          test "$(jq -r '.schemaVersion' "$d4")" = "1"
+          test "$(jq -r '.draft' .local/d5-static-current-readiness/d3-release.json)" = "false"
+          test "$(jq -r '.draft' .local/d5-static-current-readiness/d4-release.json)" = "false"
+          test "$(jq -r '.prerelease' .local/d5-static-current-readiness/d3-release.json)" = "true"
+          test "$(jq -r '.prerelease' .local/d5-static-current-readiness/d4-release.json)" = "true"
+
+          jq -e '.base.generationId == input.active.baseIdentity and .epochId == input.epochId' "$d3" "$d4" >/dev/null
+
+          d3_head="$(jq -er '.lastCommittedLedgerIndex' "$d3")"
+          d4_head="$(jq -er '.active.throughLedgerIndex' "$d4")"
+          tail_start="$(jq -er '.currentProjectionTail.coverageStartLedgerIndex' "$d3")"
+          tail_count="$(jq -er '.currentProjectionTail.generations | length' "$d3")"
+          updated_at="$(jq -er '.updatedAt' "$d3")"
+          d3_sha="$(jq -er '.channelSha256' "$d3")"
+          d4_sha="$(jq -er '.channelSha256' "$d4")"
+          updated_epoch="$(date -u -d "$updated_at" +%s)"
+          now_epoch="$(date -u +%s)"
+          age_seconds="$((now_epoch - updated_epoch))"
+          checkpoint_gap="$((d3_head - d4_head))"
+          uncovered_ledgers="$((tail_start > d4_head ? tail_start - d4_head : 0))"
+          coverage_ok=false
+          freshness_ok=false
+          identity_ok=true
+          if (( d3_head >= d4_head && d4_head >= tail_start && tail_count <= 128 )); then
+            coverage_ok=true
+          fi
+          if (( age_seconds >= 0 && age_seconds <= 900 )); then
+            freshness_ok=true
+          fi
+          if (( d4_head == tail_start )); then
+            d4_hash="$(jq -er '.active.throughLedgerHash' "$d4")"
+            tail_hash="$(jq -er '.currentProjectionTail.coverageStartLedgerHash' "$d3")"
+            if [[ "$d4_hash" != "$tail_hash" ]]; then
+              identity_ok=false
+              coverage_ok=false
+            fi
+          fi
+
+          jq -n \
+            --arg d3ChannelSha256 "$d3_sha" \
+            --arg d4ChannelSha256 "$d4_sha" \
+            --arg d3UpdatedAt "$updated_at" \
+            --argjson d3Head "$d3_head" \
+            --argjson d4Through "$d4_head" \
+            --argjson tailCoverageStart "$tail_start" \
+            --argjson tailPointers "$tail_count" \
+            --argjson checkpointGap "$checkpoint_gap" \
+            --argjson uncoveredLedgers "$uncovered_ledgers" \
+            --argjson publicationAgeSeconds "$age_seconds" \
+            --argjson coverageOk "$coverage_ok" \
+            --argjson freshnessOk "$freshness_ok" \
+            --argjson identityOk "$identity_ok" \
+            '{
+              schemaVersion:1, network:"devnet", d3ChannelSha256:$d3ChannelSha256,
+              d4ChannelSha256:$d4ChannelSha256, d3UpdatedAt:$d3UpdatedAt,
+              d3Head:$d3Head, d4Through:$d4Through,
+              tailCoverageStart:$tailCoverageStart, tailPointers:$tailPointers,
+              checkpointGap:$checkpointGap, uncoveredLedgers:$uncoveredLedgers,
+              publicationAgeSeconds:$publicationAgeSeconds,
+              coverageOk:$coverageOk, freshnessOk:$freshnessOk, identityOk:$identityOk,
+              readiness: (if $coverageOk and $freshnessOk and $identityOk then "PASS" else "BLOCKED" end),
+              publicationMutation:false
+            }' > .local/d5-static-current-readiness/summary.json
+
+          cat .local/d5-static-current-readiness/summary.json | tee "$GITHUB_STEP_SUMMARY"
+          test "$(jq -r '.readiness' .local/d5-static-current-readiness/summary.json)" = "PASS"
+
+      - name: Upload read-only D5 readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d5-static-current-readiness
+          path: .local/d5-static-current-readiness/summary.json
+          if-no-files-found: warn
+          retention-days: 14
