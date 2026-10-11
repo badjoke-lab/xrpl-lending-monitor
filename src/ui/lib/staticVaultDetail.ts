@@ -17,6 +17,7 @@ import { buildDbLessCurrentProjectionCanonicalKey } from '../../shared/db-less/c
 import type { VaultDetailResponse, VaultRecord } from '../types/api'
 
 const REPOSITORY = 'badjoke-lab/xrpl-lending-monitor'
+const D2_BASE_TAG = 'd2-current-base-35558034659'
 const D4_CHANNEL = 'db-less-current-overlay-channel-v1'
 const D3_CHANNEL = 'db-less-live-channel-candidate-v1'
 const MAX_FRESHNESS_AGE_MS = 15 * 60 * 1000
@@ -138,10 +139,7 @@ export async function loadStaticVaultDetail(
   const [base, tail] = await Promise.all([
     openPublicGithubCurrentBase({
       repository: REPOSITORY,
-      releaseTag: overlay.channel.active.location.releaseTag.replace(
-        /^db-less-current-overlay-v1-\d+$/,
-        'd2-current-base-35558034659',
-      ),
+      releaseTag: D2_BASE_TAG,
       fetcher: options.fetcher,
     }),
     readPublicIndexedCurrentTailAfterCheckpoint({
