@@ -6,7 +6,7 @@ import {
 } from '../lib/staticVaultDetail'
 import type { ResourceState } from '../types/api'
 
-export function useStaticVaultDetail(vaultId: string) {
+export function useStaticVaultDetail(vaultId: string | null) {
   const [resource, setResource] = useState<ResourceState<StaticVaultDetailRead>>({
     state: 'loading',
     data: null,
@@ -15,6 +15,7 @@ export function useStaticVaultDetail(vaultId: string) {
   const [refreshToken, setRefreshToken] = useState(0)
 
   useEffect(() => {
+    if (vaultId === null) return
     let active = true
     setResource({ state: 'loading', data: null, error: null })
     void loadStaticVaultDetail(vaultId)
