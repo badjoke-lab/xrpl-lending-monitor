@@ -1,0 +1,35 @@
+name: DB-less D5 Current-only artifact prototype
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/shared/db-less/current-only-artifact.ts'
+      - 'src/shared/db-less/current-only-artifact.test.ts'
+      - '.github/workflows/db-less-d5-current-only-artifact.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Check shared and UI type contracts
+        run: |
+          pnpm exec tsc -p tsconfig.worker.json --noEmit
+          pnpm exec tsc -p tsconfig.app.json --noEmit
+      - name: Lint D5 compact Current artifact
+        run: >-
+          pnpm exec eslint
+          src/shared/db-less/current-only-artifact.ts
+          src/shared/db-less/current-only-artifact.test.ts
+      - name: Verify Current-only provenance and negative cases
+        run: pnpm exec vitest run src/shared/db-less/current-only-artifact.test.ts
