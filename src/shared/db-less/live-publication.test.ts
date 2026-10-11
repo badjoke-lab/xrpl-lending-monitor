@@ -335,4 +335,48 @@ describe('DB-less live publication preparation', () => {
     expect(finalized.nextChannel.live?.location).toEqual(alternateLocation)
   })
 
+  it('optionally publishes immutable Current-only asset before the SHA-bound D3 channel pointer', async () => {
+    const channel = await initialChannel()
+    const published = await prepareDbLessLivePublication({
+      channel,
+      publicationLocation: LOCATION,
+      scan: scan({
+        ledgerIndex: 101,
+        ledgerHash: B,
+        parentHash: A,
+        event: currentMutationTransaction(),
+      }),
+      sourceRevision: 'revision-a',
+      enableCurrentOnlyArtifact: true,
+    })
+    if (published.status !== 'prepared') throw new Error('expected prepared publication')
+    const pointer = published.nextChannel.currentProjectionTail?.generations[0]
+    const additional = published.immutableArtifacts.find(a =>
+      a.key.endsWith('-current-only-v1.json'))
+    expect(additional).toBeDefined()
+    expect(pointer?.currentOnly).toEqual({
+      key: additional?.key,
+      sha256: additional?.sha256,
+      bytes: additional?.bytes.byteLength,
+      sourceDeltaManifestSha256: published.delta.manifestArtifact.sha256,
+    })
+    expect(published.immutableArtifacts.at(-1)?.key).toBe(published.chain.manifestArtifact.key)
+    expect(published.delta.manifest.semanticCounts.currentProjectionMutations).toBe(1)
+
+    const legacy = await prepareDbLessLivePublication({
+      channel,
+      publicationLocation: LOCATION,
+      scan: scan({
+        ledgerIndex: 101,
+        ledgerHash: B,
+        parentHash: A,
+        event: currentMutationTransaction(),
+      }),
+      sourceRevision: 'revision-a',
+    })
+    if (legacy.status !== 'prepared') throw new Error('expected legacy publication')
+    expect(legacy.nextChannel.currentProjectionTail?.generations[0]?.currentOnly).toBeUndefined()
+    expect(legacy.immutableArtifacts.some(a => a.key.endsWith('-current-only-v1.json'))).toBe(false)
+  })
+
 })
