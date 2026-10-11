@@ -1,0 +1,38 @@
+name: DB-less D5 real browser public transport smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tests/e2e/db-less-public-browser-transport.spec.ts'
+      - '.github/workflows/db-less-d5-real-browser-transport.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  browser_transport:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Build static Current candidate
+        env:
+          VITE_STATIC_CURRENT_ENABLED: 'true'
+        run: pnpm build:deploy-assets
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Probe live public Releases from Chromium
+        run: pnpm exec playwright test tests/e2e/db-less-public-browser-transport.spec.ts --project=chromium --retries=0
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d5-real-browser-transport
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
