@@ -22,6 +22,10 @@ import {
   type DbLessArtifact,
   type DbLessLiveDeltaArtifactSet,
 } from './live-delta'
+import {
+  buildDbLessCurrentOnlyArtifactV1,
+  type DbLessCurrentOnlyAssetSetV1,
+} from './current-only-artifact'
 
 export const DB_LESS_CURRENT_PROJECTION_TAIL_MAX_GENERATIONS = 128
 
@@ -48,6 +52,7 @@ export interface DbLessPreparedLiveDelta {
   channel: DbLessChannelV1
   previousChain: DbLessLiveChainManifestV1 | null
   delta: DbLessLiveDeltaArtifactSet
+  currentOnlyAsset?: DbLessCurrentOnlyAssetSetV1 | null
   finalLedgerIndex: number
   finalLedgerHash: string
   immutableArtifactCountBeforeChain: number
@@ -128,6 +133,14 @@ function nextCurrentProjectionTail(options: {
       endLedgerHash: manifest.endLedgerHash,
       ledgerCount: manifest.ledgerCount,
       currentProjectionMutations: mutations,
+      ...(options.prepared.currentOnlyAsset
+        ? { currentOnly: {
+            key: options.prepared.currentOnlyAsset.artifact.key,
+            sha256: options.prepared.currentOnlyAsset.artifact.sha256,
+            bytes: options.prepared.currentOnlyAsset.artifact.bytes.byteLength,
+            sourceDeltaManifestSha256: artifact.sha256,
+          } }
+        : {}),
     })
   }
 
@@ -180,6 +193,8 @@ export async function prepareDbLessLiveDelta(options: {
   scan: IncrementalScanResult
   sourceRevision: string
   chunkLimits?: NormalizedPayloadChunkLimits
+  /** Isolated opt-in; false for all existing D3 callers and production runs. */
+  enableCurrentOnlyArtifact?: boolean
 }): Promise<DbLessLiveDeltaPreparation> {
   await verifyDbLessChannel(options.channel)
   await assertPreviousChainMatchesChannel({
@@ -222,14 +237,21 @@ export async function prepareDbLessLiveDelta(options: {
     chunkLimits: options.chunkLimits,
   })
 
+  const currentOnlyAsset = options.enableCurrentOnlyArtifact === true
+    && delta.manifest.semanticCounts.currentProjectionMutations > 0
+    ? await buildDbLessCurrentOnlyArtifactV1(delta)
+    : null
+
   return {
     status: 'delta-prepared',
     channel: options.channel,
     previousChain: options.previousChain ?? null,
     delta,
+    currentOnlyAsset,
     finalLedgerIndex: last.ledgerIndex,
     finalLedgerHash: last.ledgerHash,
-    immutableArtifactCountBeforeChain: delta.chunkArtifacts.length + 1,
+    immutableArtifactCountBeforeChain: delta.chunkArtifacts.length + 1
+      + (currentOnlyAsset === null ? 0 : 1),
   }
 }
 
@@ -277,6 +299,7 @@ export async function finalizeDbLessLivePublication(options: {
     immutableArtifacts: [
       ...prepared.delta.chunkArtifacts,
       prepared.delta.manifestArtifact,
+      ...(prepared.currentOnlyAsset ? [prepared.currentOnlyAsset.artifact] : []),
       chain.manifestArtifact,
     ],
     nextChannel,
@@ -291,6 +314,7 @@ export async function prepareDbLessLivePublication(options: {
   scan: IncrementalScanResult
   sourceRevision: string
   chunkLimits?: NormalizedPayloadChunkLimits
+  enableCurrentOnlyArtifact?: boolean
 }): Promise<DbLessLivePublicationPlan> {
   const prepared = await prepareDbLessLiveDelta({
     channel: options.channel,
@@ -298,6 +322,7 @@ export async function prepareDbLessLivePublication(options: {
     scan: options.scan,
     sourceRevision: options.sourceRevision,
     chunkLimits: options.chunkLimits,
+    enableCurrentOnlyArtifact: options.enableCurrentOnlyArtifact,
   })
   if (prepared.status === 'caught-up') return prepared
   return finalizeDbLessLivePublication({
