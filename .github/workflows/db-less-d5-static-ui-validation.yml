@@ -10,6 +10,10 @@ on:
       - 'src/shared/db-less/current-base-github-release.test.ts'
       - 'src/shared/db-less/current-tail-github-public.ts'
       - 'src/shared/db-less/current-overlay-chain-compactor.test.ts'
+      - 'src/ui/lib/staticVaultDetail.ts'
+      - 'src/ui/lib/staticVaultDetail.test.ts'
+      - 'src/ui/hooks/useStaticVaultDetail.ts'
+      - 'src/ui/pages/VaultDetailPage.tsx'
       - '.github/workflows/db-less-d5-static-ui-validation.yml'
 
 permissions:
@@ -36,9 +40,13 @@ jobs:
           src/shared/db-less/current-base-github-release.test.ts
           src/shared/db-less/current-overlay-chain-compactor.test.ts
           src/shared/db-less/current-tail-github-public.ts
-          src/shared/db-less/current-overlay-chain-compactor.test.ts
+          src/ui/lib/staticVaultDetail.ts
+          src/ui/lib/staticVaultDetail.test.ts
+          src/ui/hooks/useStaticVaultDetail.ts
+          src/ui/pages/VaultDetailPage.tsx
       - name: D5 focused tests
         run: >-
           pnpm exec vitest run
           src/shared/db-less/current-base-reader.test.ts
           src/shared/db-less/current-base-github-release.test.ts
+          src/ui/lib/staticVaultDetail.test.ts

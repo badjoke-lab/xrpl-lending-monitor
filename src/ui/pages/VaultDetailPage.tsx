@@ -7,6 +7,7 @@ import {
   UnavailableBlock,
 } from '../components/DataDisplay'
 import { useApiResource } from '../hooks/useApiResource'
+import { useStaticVaultDetail } from '../hooks/useStaticVaultDetail'
 import { formatInteger, truncateMiddle } from '../lib/formatting'
 import type { VaultDetailResponse } from '../types/api'
 
@@ -20,8 +21,19 @@ function amount(value: string | null, assetKey: string): string {
 }
 
 export function VaultDetailPage({ vaultId, onNavigate }: VaultDetailPageProps) {
-  const { resource, reload } = useApiResource<VaultDetailResponse>(`/api/vaults/${vaultId}`)
-  const response = resource.state === 'ready' ? resource.data : null
+  const staticCandidate = import.meta.env.VITE_STATIC_CURRENT_ENABLED === 'true'
+  const staticResource = useStaticVaultDetail(staticCandidate ? vaultId : null)
+  const apiResource = useApiResource<VaultDetailResponse>(
+    staticCandidate ? null : `/api/vaults/${vaultId}`,
+  )
+  const resource = staticCandidate ? staticResource.resource : apiResource.resource
+  const reload = staticCandidate ? staticResource.reload : apiResource.reload
+  const staticRead = staticCandidate && staticResource.resource.state === 'ready'
+    ? staticResource.resource.data
+    : null
+  const response = staticCandidate
+    ? (staticRead?.response ?? null)
+    : (apiResource.resource.state === 'ready' ? apiResource.resource.data : null)
   const vault = response?.data ?? null
 
   return (
@@ -45,19 +57,42 @@ export function VaultDetailPage({ vaultId, onNavigate }: VaultDetailPageProps) {
           <p className="page-kicker">Vault detail</p>
           <h1 className="mono">{truncateMiddle(vaultId, 12)}</h1>
           <p className="page-summary">
-            Current validated Vault state from the active Devnet snapshot. Historical records are kept separate.
+            {staticCandidate
+              ? 'Verified Devnet Vault state from public static artifacts; unavailable when coverage cannot be proven.'
+              : 'Current validated Vault state from the existing Devnet API. Static candidate cutover is not yet active.'}
           </p>
         </div>
         <div className="page-actions">
           <button className="secondary-button" type="button" onClick={reload}>Refresh</button>
-          <a className="primary-button" href={`/api/vaults/${vaultId}`}>Vault JSON</a>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!vault}
+            onClick={() => {
+              if (vault) void navigator.clipboard?.writeText(JSON.stringify(vault, null, 2))
+            }}
+          >
+            Copy Vault JSON
+          </button>
         </div>
       </header>
 
-      {resource.state === 'loading' ? <LoadingBlock label="Loading Vault detail" /> : null}
+      {resource.state === 'loading' ? <LoadingBlock label="Verifying static Devnet Vault detail" /> : null}
+      {staticRead ? (
+        <p role="status" className="page-summary">
+          Static Current: {staticRead.freshness === 'fresh' ? 'fresh' : 'stale'} ·
+          D3 committed ledger {formatInteger(staticRead.committedLedger)} ·
+          D4 checkpoint {formatInteger(staticRead.checkpointLedger)} ·
+          Published {staticRead.publicationUpdatedAt}
+        </p>
+      ) : null}
       {resource.state === 'error' ? <ErrorBlock message={resource.error} onRetry={reload} /> : null}
       {response?.availability.state === 'unavailable' ? (
         <UnavailableBlock title="Vault detail unavailable" reason={response.availability.reason ?? 'Current Vault data is unavailable.'} />
+      ) : null}
+
+      {response?.availability.state === 'available' && !vault ? (
+        <UnavailableBlock title="Vault not found" reason="No live Vault exists at this identifier in the verified static Current state." />
       ) : null}
 
       {vault ? (
@@ -120,7 +155,7 @@ export function VaultDetailPage({ vaultId, onNavigate }: VaultDetailPageProps) {
             </Panel>
           </div>
 
-          <Panel title="Relationships" description="Connected Brokers, Loans, and history require their dedicated bounded APIs">
+          <Panel title="Relationships" description="Connected Brokers, Loans, and history require separate verified static data sources">
             <UnavailableBlock
               title="Relationship panels not yet available"
               reason="The current Vault object is verified. Connected Loan Brokers, Loans, activity, and history remain separate roadmap units and are not inferred here."
