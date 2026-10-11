@@ -91,3 +91,92 @@ test('relay is not an open proxy and rejects non-GET methods', async ({ page }) 
   }, RELAY)
   expect(status).toEqual([400, 400, 405])
 })
+
+test('real browser reads D2 lookup, D4 shard and D3 live assets with exact SHA', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async ({ relay, repo, baseTag, d4ChannelTag }) => {
+    const api = async (tag: string) => {
+      const response = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${tag}`)
+      if (!response.ok) throw Error(`GitHub metadata fetch failed: ${response.status}`)
+      return response.json() as Promise<{
+        body: string
+        assets: Array<{ name: string; size: number; digest: string | null }>
+      }>
+    }
+    const baseRelease = await api(baseTag)
+    const d4Release = await api(d4ChannelTag)
+    const d3Release = await api('db-less-live-channel-candidate-v1')
+    const d4 = JSON.parse(d4Release.body) as {
+      active: { location: { releaseTag: string }; manifestKey: string }
+    }
+    const d3 = JSON.parse(d3Release.body) as {
+      currentProjectionTail: {
+        generations: Array<{
+          generationId: string
+          location: { releaseTag: string }
+          manifestKey: string
+          manifestSha256: string
+        }>
+      }
+    }
+    const latest = d3.currentProjectionTail.generations.at(-1)
+    if (!latest) throw Error('No D3 tail generation')
+    const d3Assets = await api(latest.location.releaseTag)
+    const d3Chunk = d3Assets.assets.find((value) =>
+      value.name.startsWith(latest.generationId) && value.name.includes('-chunk-'))
+    const baseLookup = baseRelease.assets.find((value) => /^lookup-[0-9A-F]+\.json\.gz$/.test(value.name))
+    if (!baseLookup || !d3Chunk) throw Error('Required actual D2/D3 asset not found')
+    const d4ManifestResponse = await fetch(`${relay}/artifacts/${d4.active.location.releaseTag}/${d4.active.manifestKey}`)
+    if (!d4ManifestResponse.ok) throw Error('D4 relay manifest unavailable')
+    const d4Manifest = await d4ManifestResponse.json() as {
+      shards: Array<{ key: string; bytes: number; artifactSha256: string }>
+    }
+    const shard = d4Manifest.shards[0]
+    if (!shard) throw Error('D4 manifest has no shards')
+    const assets = [
+      {
+        label: 'D2 indexed lookup bucket',
+        tag: baseTag, name: baseLookup.name, bytes: baseLookup.size,
+        sha: baseLookup.digest?.replace(/^sha256:/, '') ?? '',
+      },
+      {
+        label: 'D4 bounded overlay shard',
+        tag: d4.active.location.releaseTag, name: shard.key,
+        bytes: shard.bytes, sha: shard.artifactSha256,
+      },
+      {
+        label: 'D3 live tail manifest',
+        tag: latest.location.releaseTag, name: latest.manifestKey,
+        bytes: -1, sha: latest.manifestSha256,
+      },
+      {
+        label: 'D3 live chunk',
+        tag: latest.location.releaseTag, name: d3Chunk.name,
+        bytes: d3Chunk.size, sha: d3Chunk.digest?.replace(/^sha256:/, '') ?? '',
+      },
+    ]
+    const findings = []
+    for (const asset of assets) {
+      const response = await fetch(`${relay}/artifacts/${asset.tag}/${asset.name}`)
+      const payload = await response.arrayBuffer()
+      const digest = await crypto.subtle.digest('SHA-256', payload)
+      const sha = [...new Uint8Array(digest)]
+        .map((value) => value.toString(16).padStart(2, '0')).join('')
+      findings.push({
+        label: asset.label,
+        status: response.status,
+        actualBytes: payload.byteLength,
+        expectedBytes: asset.bytes,
+        digestOk: sha === asset.sha,
+        bytesOk: asset.bytes < 0 || payload.byteLength === asset.bytes,
+        cors: response.headers.get('access-control-allow-origin'),
+      })
+    }
+    return findings
+  }, {
+    relay: RELAY, repo: REPO, baseTag: BASE_TAG, d4ChannelTag: CHANNEL_TAG,
+  })
+  console.log('D5_RELAY_SPIKE_REAL_ASSETS=' + JSON.stringify(result))
+  expect(result.length).toBe(4)
+  expect(result.every((item) => item.status === 200 && item.bytesOk && item.digestOk && item.cors === '*')).toBe(true)
+})
