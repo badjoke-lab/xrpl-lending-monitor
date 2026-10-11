@@ -1,0 +1,51 @@
+name: DB-less D5 read-only relay spike
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/edge/d5-readonly-release-relay-spike.ts'
+      - 'wrangler.d5-relay-spike.jsonc'
+      - 'tests/e2e/d5-readonly-release-relay-spike.spec.ts'
+      - '.github/workflows/db-less-d5-relay-spike.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  real_browser_spike:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Build static browser origin
+        env:
+          VITE_STATIC_CURRENT_ENABLED: 'false'
+        run: pnpm build:deploy-assets
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Start isolated workerd relay without deploying
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler dev --local --config wrangler.d5-relay-spike.jsonc --ip 127.0.0.1 --port 8788 > /tmp/d5-relay-spike.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8788/_health; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/d5-relay-spike.log
+          exit 1
+      - name: Chromium cross-origin immutable byte/digest probe
+        run: pnpm exec playwright test tests/e2e/d5-readonly-release-relay-spike.spec.ts --project=chromium --retries=0
+      - name: Upload isolated transport evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d5-relay-spike
+          path: |
+            playwright-report/
+            test-results/
+            /tmp/d5-relay-spike.log
+          if-no-files-found: ignore
+          retention-days: 14
