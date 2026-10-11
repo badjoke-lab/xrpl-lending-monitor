@@ -3,7 +3,7 @@ const REPO = 'badjoke-lab/xrpl-lending-monitor'
 const MAX_ASSET_BYTES = 2_000_000
 const ALLOWED_REDIRECT_HOSTS = new Set(['github.com', 'release-assets.githubusercontent.com'])
 const TAG_RE = /^(?:d2-current-base-\d+|db-less-current-overlay-v1-\d+|db-less-live-data-v1-\d{8}-\d{2}(?:-r\d+)?)$/
-const FILE_RE = /^(?:base-manifest\.json|(?:vault|loan|loan-broker)-page-\d{6}\.json\.gz|lookup-[0-9A-F]+\.json\.gz|current-overlay-v1-\d+-(?:manifest|bucket-\d{4})\.json|live-v1-\d+-\d+-[a-f0-9]{16}-[a-f0-9]{12}-(?:manifest|chunk-\d{4})\.json)$/
+const FILE_RE = /^(?:base-manifest\.json|(?:vault|loan|loan-broker)-page-\d{6}\.json\.gz|lookup-[0-9A-F]+\.json\.gz|current-overlay-v1-\d+-(?:manifest|bucket-\d{4})\.json|live-v1-\d+-\d+-[a-f0-9]{16}-[a-f0-9]{12}-(?:manifest|chunk-\d{4}|current-only-v1)\.json)$/
 
 function respond(status: number, message: string): Response {
   return new Response(message, {
