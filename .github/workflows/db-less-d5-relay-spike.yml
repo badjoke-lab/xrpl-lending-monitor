@@ -7,7 +7,7 @@ on:
       - 'src/edge/d5-readonly-release-relay-spike.ts'
       - 'wrangler.d5-relay-spike.jsonc'
       - 'tests/e2e/d5-readonly-release-relay-spike.spec.ts'
-      - 'tests/e2e/d5-readonly-release-relay-spike.unit.test.ts'
+      - 'src/edge/d5-readonly-release-relay-spike.test.ts'
       - '.github/workflows/db-less-d5-relay-spike.yml'
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - name: Verify Current-only relay allowlist without publication
-        run: pnpm exec vitest run tests/e2e/d5-readonly-release-relay-spike.unit.test.ts
+        run: pnpm exec vitest run src/edge/d5-readonly-release-relay-spike.test.ts
       - name: Build static browser origin
         env:
           VITE_STATIC_CURRENT_ENABLED: 'false'
