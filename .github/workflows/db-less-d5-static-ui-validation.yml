@@ -44,6 +44,10 @@ jobs:
           src/ui/lib/staticVaultDetail.test.ts
           src/ui/hooks/useStaticVaultDetail.ts
           src/ui/pages/VaultDetailPage.tsx
+      - name: Build D5 static candidate assets
+        env:
+          VITE_STATIC_CURRENT_ENABLED: 'true'
+        run: pnpm build:deploy-assets
       - name: D5 focused tests
         run: >-
           pnpm exec vitest run
