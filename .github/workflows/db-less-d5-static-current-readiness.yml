@@ -60,10 +60,11 @@ jobs:
           age_seconds="$((now_epoch - updated_epoch))"
           checkpoint_gap="$((d3_head - d4_head))"
           uncovered_ledgers="$((tail_start > d4_head ? tail_start - d4_head : 0))"
+          cut_through_count="$(jq --argjson checkpoint "$d4_head" '[.currentProjectionTail.generations[] | select(.startLedgerIndex <= $checkpoint and .endLedgerIndex > $checkpoint)] | length' "$d3")"
           coverage_ok=false
           freshness_ok=false
           identity_ok=true
-          if (( d3_head >= d4_head && d4_head >= tail_start && tail_count <= 128 )); then
+          if (( d3_head >= d4_head && d4_head >= tail_start && tail_count <= 128 && cut_through_count == 0 )); then
             coverage_ok=true
           fi
           if (( age_seconds >= 0 && age_seconds <= 900 )); then
@@ -88,6 +89,7 @@ jobs:
             --argjson tailPointers "$tail_count" \
             --argjson checkpointGap "$checkpoint_gap" \
             --argjson uncoveredLedgers "$uncovered_ledgers" \
+            --argjson cutThroughGenerations "$cut_through_count" \
             --argjson publicationAgeSeconds "$age_seconds" \
             --argjson coverageOk "$coverage_ok" \
             --argjson freshnessOk "$freshness_ok" \
@@ -97,7 +99,7 @@ jobs:
               d4ChannelSha256:$d4ChannelSha256, d3UpdatedAt:$d3UpdatedAt,
               d3Head:$d3Head, d4Through:$d4Through,
               tailCoverageStart:$tailCoverageStart, tailPointers:$tailPointers,
-              checkpointGap:$checkpointGap, uncoveredLedgers:$uncoveredLedgers,
+              checkpointGap:$checkpointGap, uncoveredLedgers:$uncoveredLedgers, cutThroughGenerations:$cutThroughGenerations,
               publicationAgeSeconds:$publicationAgeSeconds,
               coverageOk:$coverageOk, freshnessOk:$freshnessOk, identityOk:$identityOk,
               readiness: (if $coverageOk and $freshnessOk and $identityOk then "PASS" else "BLOCKED" end),
