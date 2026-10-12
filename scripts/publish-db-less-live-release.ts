@@ -156,7 +156,9 @@ async function main(): Promise<void> {
     }
     artifacts.push({
       key: item.key,
-      mediaType: 'application/json',
+      mediaType: item.key.endsWith('-current-only-v1.json.gz')
+        ? 'application/gzip'
+        : 'application/json',
       bytes,
       sha256: item.sha256,
       immutable: true,
