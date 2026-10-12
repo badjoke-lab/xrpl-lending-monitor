@@ -93,9 +93,11 @@ jobs:
       - name: Bounded read-only measurement of actual D4 shards
         env:
           RUN_D5_REAL_D4_GZIP_SAMPLE: 'true'
+          GH_TOKEN: ${{ github.token }}
         run: pnpm exec vitest run src/shared/db-less/current-overlay-gzip-live-sample.test.ts
       - name: Exhaustive read-only SHA/gzip audit of 256 active D4 shards
         env:
           RUN_D5_REAL_D4_FULL_AUDIT: 'true'
+          GH_TOKEN: ${{ github.token }}
         run: pnpm exec vitest run src/shared/db-less/current-overlay-gzip-full-live-audit.test.ts
 
