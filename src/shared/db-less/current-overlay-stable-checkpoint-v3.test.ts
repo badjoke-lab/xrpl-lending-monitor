@@ -4,6 +4,7 @@ import { buildDbLessCurrentOverlayGenerationProvenance } from './current-overlay
 import {
   prepareDbLessStableD4CheckpointV3,
   readDbLessStableD4CheckpointV3,
+  getDbLessStableD4ObjectV3,
 } from './current-overlay-stable-checkpoint-v3'
 
 const H = 'A'.repeat(64)
@@ -68,6 +69,46 @@ describe('isolated D4 v3 referenced immutable checkpoint read', () => {
       immutableSources: [...new Set(second.manifest.shards.map(s=>s.releaseTag))],
       published:false,
     }))
+  })
+
+  it('uses only the selected v3 SHA-bound bucket for a Vault lookup and preserves tombstones', async () => {
+    const { second, changed, readArtifact } = await fixture()
+    const chosen = changed.find(e => !e.isTombstone)!
+    const fetched: string[] = []
+    const hit = await getDbLessStableD4ObjectV3({
+      manifestBytes: second.manifestArtifact.bytes,
+      manifestSha256: second.manifestArtifact.sha256,
+      objectType: 'vault',
+      objectId: chosen.objectId,
+      readArtifact: async (releaseTag, key) => {
+        fetched.push(`${releaseTag}/${key}`)
+        return readArtifact(releaseTag, key)
+      },
+    })
+    expect(hit.item).toEqual(chosen)
+    expect(hit.shardReads).toBe(1)
+    expect(fetched).toHaveLength(1)
+
+    const deleted = changed.find(e => e.isTombstone)!
+    const gone = await getDbLessStableD4ObjectV3({
+      manifestBytes: second.manifestArtifact.bytes,
+      manifestSha256: second.manifestArtifact.sha256,
+      objectType: 'vault',
+      objectId: deleted.objectId,
+      readArtifact,
+    })
+    expect(gone.item?.isTombstone).toBe(true)
+    expect(gone.shardReads).toBe(1)
+
+    const absent = await getDbLessStableD4ObjectV3({
+      manifestBytes: second.manifestArtifact.bytes,
+      manifestSha256: second.manifestArtifact.sha256,
+      objectType: 'vault',
+      objectId: 'NOT-PRESENT',
+      readArtifact,
+    })
+    expect(absent.item).toBeNull()
+    expect(absent.shardReads).toBeLessThanOrEqual(1)
   })
 
   it('rejects a missing or corrupted referenced Release asset without any fallback', async () => {
