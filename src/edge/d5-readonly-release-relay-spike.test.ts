@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import relay from './d5-readonly-release-relay-spike'
 
 const TAG = 'db-less-live-data-v1-20261011-16'
-const CURRENT_ONLY = 'live-v1-101-102-aaaaaaaaaaaaaaaa-cccccccccccc-current-only-v1.json'
+const CURRENT_ONLY = 'live-v1-101-102-aaaaaaaaaaaaaaaa-cccccccccccc-current-only-v1.json.gz'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -36,7 +36,7 @@ describe('isolated D5 relay Current-only allowlist', () => {
     const invalidPaths = [
       `/artifacts/db-less-current-overlay-v1-100/${CURRENT_ONLY}`,
       `/artifacts/${TAG}/live-v1-101-102-aaaaaaaaaaaaaaaa-cccccccccccc-current-only-v2.json`,
-      `/artifacts/${TAG}/live-v1-101-102-aaaaaaaaaaaaaaaa-cccccccccccc-current-only-v1.json.gz`,
+      `/artifacts/${TAG}/live-v1-101-102-aaaaaaaaaaaaaaaa-cccccccccccc-current-only-v1.json`,
     ]
     for (const path of invalidPaths) {
       const response = await relay.fetch(new Request(`https://example.test${path}`))
