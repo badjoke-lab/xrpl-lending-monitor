@@ -1,6 +1,11 @@
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import type { DbLessArtifact, DbLessLiveDeltaArtifactSet } from './live-delta'
+import {
+  gzipDbLessCurrentOnlyJson,
+  gunzipDbLessCurrentOnlyJson,
+  MAX_CURRENT_ONLY_UNCOMPRESSED_BYTES,
+} from './current-only-gzip'
 
 const SHA256 = /^[a-f0-9]{64}$/
 const MAX_CURRENT_ONLY_RECORDS = 10_000
@@ -157,14 +162,18 @@ export async function buildDbLessCurrentOnlyArtifactV1(
     records,
   }
   assertDbLessCurrentOnlyArtifactV1(document)
-  const bytes = utf8(`${canonicalJson(document)}\n`)
-  if (bytes.byteLength > MAX_CURRENT_ONLY_BYTES) {
-    throw new Error('Current-only artifact exceeds the bounded browser byte budget')
+  const json = `${canonicalJson(document)}\n`
+  if (utf8(json).byteLength > MAX_CURRENT_ONLY_UNCOMPRESSED_BYTES) {
+    throw new Error('Current-only uncompressed JSON exceeds the bounded browser byte budget')
   }
-  const key = `${delta.manifest.generationId}-current-only-v1.json`
+  const bytes = await gzipDbLessCurrentOnlyJson(json)
+  if (bytes.byteLength > MAX_CURRENT_ONLY_BYTES) {
+    throw new Error('Current-only compressed artifact exceeds the bounded browser byte budget')
+  }
+  const key = `${delta.manifest.generationId}-current-only-v1.json.gz`
   const artifact: DbLessArtifact = {
     key,
-    mediaType: 'application/json',
+    mediaType: 'application/gzip',
     bytes,
     sha256: await sha256Hex(bytes),
     immutable: true,
@@ -194,7 +203,8 @@ export async function decodeAndVerifyDbLessCurrentOnlyArtifactV1(options: {
     || await sha256Hex(options.bytes) !== options.expectedSha256) {
     throw new Error('Current-only immutable asset digest or byte bound mismatch')
   }
-  const document = JSON.parse(new TextDecoder().decode(options.bytes)) as DbLessCurrentOnlyArtifactV1
+  const decoded = await gunzipDbLessCurrentOnlyJson(options.bytes)
+  const document = JSON.parse(decoded) as DbLessCurrentOnlyArtifactV1
   assertDbLessCurrentOnlyArtifactV1(document)
   const expected = options.expected
   for (const key of Object.keys(expected) as Array<keyof typeof expected>) {
@@ -202,7 +212,7 @@ export async function decodeAndVerifyDbLessCurrentOnlyArtifactV1(options: {
       throw new Error(`Current-only pointer identity mismatch: ${key}`)
     }
   }
-  if (new TextDecoder().decode(options.bytes) !== `${canonicalJson(document)}\n`) {
+  if (decoded !== `${canonicalJson(document)}\n`) {
     throw new Error('Current-only artifact is not canonical')
   }
   return document
