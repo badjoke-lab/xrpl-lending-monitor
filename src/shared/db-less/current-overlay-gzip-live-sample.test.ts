@@ -10,7 +10,14 @@ const CHANNEL_TAG = 'db-less-current-overlay-channel-v1'
 
 async function getBounded(url: string, limit: number): Promise<Uint8Array> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000), redirect: 'follow' })
+    const apiRequest = new URL(url).hostname === 'api.github.com'
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(30_000),
+      redirect: 'follow',
+      headers: apiRequest && process.env.GH_TOKEN
+        ? { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json' }
+        : { Accept: 'application/octet-stream' },
+    })
     if (res.ok) {
       const contentLength = res.headers.get('content-length')
       if (contentLength && Number(contentLength) > limit) throw new Error('D4 live sample byte bound exceeded')
