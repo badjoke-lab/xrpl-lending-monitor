@@ -15,6 +15,8 @@ on:
       - 'src/shared/db-less/current-tail-github-public-current-only.test.ts'
       - 'src/shared/db-less/channel.ts'
       - 'src/shared/db-less/live-publication.ts'
+      - 'src/shared/db-less/live-delta.ts'
+      - 'scripts/publish-db-less-live-release.ts'
       - 'src/shared/db-less/live-publication.test.ts'
       - 'scripts/prepare-db-less-live-run.ts'
       - '.github/workflows/db-less-d5-current-only-artifact.yml'
@@ -35,6 +37,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build D3 preparation CLI without running or publishing
         run: pnpm build:db-less-live-run
+      - name: Build D3 Release publisher CLI without publishing
+        run: pnpm build:db-less-live-publisher
       - name: Confirm production D3 workflow has not opted in
         shell: bash
         run: |
@@ -61,6 +65,8 @@ jobs:
           src/shared/db-less/current-tail-github-public-current-only.test.ts
           src/shared/db-less/channel.ts
           src/shared/db-less/live-publication.ts
+          src/shared/db-less/live-delta.ts
+          scripts/publish-db-less-live-release.ts
           src/shared/db-less/live-publication.test.ts
           scripts/prepare-db-less-live-run.ts
       - name: Verify Current-only provenance and negative cases
