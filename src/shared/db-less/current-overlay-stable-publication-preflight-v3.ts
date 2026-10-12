@@ -4,7 +4,7 @@
  * The caller must separately compare its expected D3 source identity and
  * active-channel revision at the actual publication transaction boundary.
  */
-import { sha256Hex } from '../current-state/canonical-json'
+import { canonicalJson, sha256Hex } from '../current-state/canonical-json'
 import {
   readDbLessStableD4CheckpointV3,
   type DbLessStableD4CheckpointV3,
@@ -82,7 +82,8 @@ export async function verifyDbLessStableD4PublicationPreflightV3(options: {
     manifestSha256: options.manifestArtifact.sha256,
     readArtifact,
   })
-  if (replay.manifest.stateSha256 !== options.expectedStateSha256
+  if (canonicalJson(replay.manifest) !== canonicalJson(options.manifest)
+    || replay.manifest.stateSha256 !== options.expectedStateSha256
     || replay.entries.length !== options.manifest.entryCount) {
     throw new Error('D4 v3 cutover replay state digest mismatch')
   }
