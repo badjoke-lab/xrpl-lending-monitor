@@ -126,7 +126,7 @@ describe('bounded Current-only tail reader for D5', () => {
     })).rejects.toThrow(/total byte budget/)
     expect(accessed).toBe(false)
     const changed = new Uint8Array(f.bytes)
-    changed[5] = 0
+    changed[5] ^= 0x01
     await expect(readDbLessCurrentOnlyTailV1({
       channel: f.channel,
       checkpoint: f.checkpoint,
