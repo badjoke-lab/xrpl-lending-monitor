@@ -112,7 +112,7 @@ describe('D5 Current-only D3 artifact prototype', () => {
     expect(result.manifest.records[1]?.isTombstone).toBe(true)
     expect(result.manifest.records[1]?.value).toBeNull()
     expect(result.manifest.currentProjectionMutations).toBe(2)
-    expect(result.artifact.key).toBe(`${GEN}-current-only-v1.json`)
+    expect(result.artifact.key).toBe(`${GEN}-current-only-v1.json.gz`)
     const sourceChunkBytes = delta.chunkArtifacts.reduce((a, c) => a + c.bytes.byteLength, 0)
     expect(result.artifact.bytes.byteLength).toBeLessThan(sourceChunkBytes)
 
