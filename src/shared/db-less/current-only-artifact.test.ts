@@ -164,9 +164,22 @@ describe('D5 Current-only D3 artifact prototype', () => {
     })).rejects.toThrow(/pointer identity/)
   })
 
-  it('fails closed on duplicate Current keys instead of silently changing ordering', async () => {
-    const delta = await fixture([[candidate('V1'), candidate('V1')]])
-    await expect(buildDbLessCurrentOnlyArtifactV1(delta)).rejects.toThrow(/duplicate canonical key/)
+  it('preserves repeated Current key transitions in one generation in ledger order', async () => {
+    const upsert = { ...candidate('V1'), sourceLedgerIndex: 101 }
+    const deletion = candidate('V1', 'current-projection', true)
+    const delta = await fixture([[upsert, deletion]])
+    const built = await buildDbLessCurrentOnlyArtifactV1(delta)
+    expect(built.manifest.currentProjectionMutations).toBe(2)
+    expect(built.manifest.records.map(record => [record.canonicalKey, record.sourceLedgerIndex, record.isTombstone]))
+      .toEqual([['vault:V1', 101, false], ['vault:V1', 102, true]])
+    expect(built.artifact.bytes.byteLength).toBeGreaterThan(0)
+  })
+
+  it('fails closed on reordered Current mutations instead of silently changing final state', async () => {
+    const upsert = { ...candidate('V1'), sourceLedgerIndex: 101 }
+    const deletion = candidate('V1', 'current-projection', true)
+    const delta = await fixture([[deletion, upsert]])
+    await expect(buildDbLessCurrentOnlyArtifactV1(delta)).rejects.toThrow(/mutation order/)
   })
 
   it('fails closed when normalized chunk content diverges from its manifest digest', async () => {
