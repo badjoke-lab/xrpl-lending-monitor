@@ -352,7 +352,7 @@ describe('DB-less live publication preparation', () => {
     if (published.status !== 'prepared') throw new Error('expected prepared publication')
     const pointer = published.nextChannel.currentProjectionTail?.generations[0]
     const additional = published.immutableArtifacts.find(a =>
-      a.key.endsWith('-current-only-v1.json'))
+      a.key.endsWith('-current-only-v1.json.gz'))
     expect(additional).toBeDefined()
     expect(pointer?.currentOnly).toEqual({
       key: additional?.key,
@@ -376,7 +376,7 @@ describe('DB-less live publication preparation', () => {
     })
     if (legacy.status !== 'prepared') throw new Error('expected legacy publication')
     expect(legacy.nextChannel.currentProjectionTail?.generations[0]?.currentOnly).toBeUndefined()
-    expect(legacy.immutableArtifacts.some(a => a.key.endsWith('-current-only-v1.json'))).toBe(false)
+    expect(legacy.immutableArtifacts.some(a => a.key.endsWith('-current-only-v1.json.gz'))).toBe(false)
   })
 
 })
