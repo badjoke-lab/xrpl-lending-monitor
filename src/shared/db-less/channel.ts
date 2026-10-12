@@ -53,6 +53,13 @@ export interface DbLessCurrentProjectionTailGenerationV1 {
   endLedgerHash: string
   ledgerCount: number
   currentProjectionMutations: number
+  /** Optional, SHA-bound Current-only immutable asset; absent on legacy generations. */
+  currentOnly?: {
+    key: string
+    sha256: string
+    bytes: number
+    sourceDeltaManifestSha256: string
+  }
 }
 
 export interface DbLessCurrentProjectionTailIndexV1 {
@@ -232,6 +239,16 @@ function assertCurrentProjectionTail(
     artifactKey(generation.location, generation.manifestKey, `${field}.manifestKey`)
     sha256(generation.manifestSha256, `${field}.manifestSha256`)
     payloadDigest(generation.payloadDigest, `${field}.payloadDigest`)
+    if (generation.currentOnly !== undefined) {
+      artifactKey(generation.location, generation.currentOnly.key, `${field}.currentOnly.key`)
+      sha256(generation.currentOnly.sha256, `${field}.currentOnly.sha256`)
+      sha256(generation.currentOnly.sourceDeltaManifestSha256, `${field}.currentOnly.sourceDeltaManifestSha256`)
+      safeInteger(generation.currentOnly.bytes, `${field}.currentOnly.bytes`, 1)
+      if (generation.currentOnly.bytes > 2_000_000
+        || generation.currentOnly.sourceDeltaManifestSha256 !== generation.manifestSha256) {
+        throw new Error('Current-only pointer byte bound or source delta identity mismatch')
+      }
+    }
     safeInteger(generation.previousLedgerIndex, `${field}.previousLedgerIndex`, 1)
     safeInteger(generation.startLedgerIndex, `${field}.startLedgerIndex`, 1)
     safeInteger(generation.endLedgerIndex, `${field}.endLedgerIndex`, 1)

@@ -12,7 +12,10 @@ import { openPublicGithubCurrentBase } from '../../shared/db-less/current-base-g
 import { asDbLessCompositeBaseReader } from '../../shared/db-less/current-base-reader'
 import { DbLessCompositeCurrentReader } from '../../shared/db-less/current-composite-reader'
 import { openPublicGithubCurrentOverlay } from '../../shared/db-less/current-overlay-github-public'
-import { readPublicIndexedCurrentTailAfterCheckpoint } from '../../shared/db-less/current-tail-github-public'
+import {
+  readPublicIndexedCurrentTailAfterCheckpoint,
+  readPublicCurrentOnlyTailAfterCheckpoint,
+} from '../../shared/db-less/current-tail-github-public'
 import { buildDbLessCurrentProjectionCanonicalKey } from '../../shared/db-less/current-projection-identity'
 import type { VaultDetailResponse, VaultRecord } from '../types/api'
 
@@ -125,7 +128,12 @@ export function resolveVaultTail(
 
 export async function loadStaticVaultDetail(
   vaultId: string,
-  options: { fetcher?: typeof fetch; now?: () => number } = {},
+  options: {
+    fetcher?: typeof fetch
+    now?: () => number
+    /** Isolated D5 qualification switch; the shipped hook does not opt in. */
+    currentTailReader?: 'indexed-legacy' | 'current-only'
+  } = {},
 ): Promise<StaticVaultDetailRead> {
   if (!/^[A-Fa-f0-9]{64}$/.test(vaultId)) {
     throw new Error('Vault ID must be a 64-digit hexadecimal identifier')
@@ -136,18 +144,21 @@ export async function loadStaticVaultDetail(
     channelReleaseTag: D4_CHANNEL,
     fetcher: options.fetcher,
   })
+  const readTail = options.currentTailReader === 'current-only'
+    ? readPublicCurrentOnlyTailAfterCheckpoint
+    : readPublicIndexedCurrentTailAfterCheckpoint
   const [base, tail] = await Promise.all([
     openPublicGithubCurrentBase({
       repository: REPOSITORY,
       releaseTag: D2_BASE_TAG,
       fetcher: options.fetcher,
     }),
-    readPublicIndexedCurrentTailAfterCheckpoint({
+    readTail({
       repository: REPOSITORY,
       channelReleaseTag: D3_CHANNEL,
       checkpoint: overlay.manifest,
       fetcher: options.fetcher,
-      maxMutationGenerations: 128,
+      maxMutationGenerations: options.currentTailReader === 'current-only' ? 32 : 128,
     }),
   ])
   if (base.manifest.generationId !== overlay.manifest.baseIdentity) {
