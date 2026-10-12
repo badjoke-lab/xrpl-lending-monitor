@@ -30,6 +30,36 @@ describe('isolated D5 relay Current-only allowlist', () => {
     )
   })
 
+  it('retries temporary upstream failure only within the three-request ceiling', async () => {
+    const unavailable = new Response('temporary', { status: 503 })
+    const available = new Response('proof', { status: 200, headers: { 'content-length': '5' } })
+    Object.defineProperty(unavailable, 'url', { value: 'https://github.com/upstream' })
+    Object.defineProperty(available, 'url', { value: 'https://release-assets.githubusercontent.com/proof' })
+    const fetchUpstream = vi.fn()
+      .mockResolvedValueOnce(unavailable)
+      .mockResolvedValueOnce(available)
+    vi.stubGlobal('fetch', fetchUpstream)
+    const response = await relay.fetch(new Request(
+      `https://example.test/artifacts/${TAG}/${CURRENT_ONLY}`,
+    ))
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('proof')
+    expect(fetchUpstream).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails closed for a missing asset with no retry, exposing upstream status', async () => {
+    const missing = new Response('missing', { status: 404 })
+    Object.defineProperty(missing, 'url', { value: 'https://github.com/upstream' })
+    const fetchUpstream = vi.fn().mockResolvedValue(missing)
+    vi.stubGlobal('fetch', fetchUpstream)
+    const response = await relay.fetch(new Request(
+      `https://example.test/artifacts/${TAG}/${CURRENT_ONLY}`,
+    ))
+    expect(response.status).toBe(502)
+    expect(await response.text()).toContain('HTTP 404')
+    expect(fetchUpstream).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects cross-class and unversioned Current-only paths without upstream fetch', async () => {
     const requestUpstream = vi.fn()
     vi.stubGlobal('fetch', requestUpstream)
