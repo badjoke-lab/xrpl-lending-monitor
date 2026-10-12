@@ -74,6 +74,9 @@ export async function readDbLessCurrentOnlyTailV1(options: {
     if (!pointer.currentOnly) {
       throw new Error('Current-only pointer is missing; D4 refresh required')
     }
+    if (pointer.currentOnly.key !== `${pointer.generationId}-current-only-v1.json.gz`) {
+      throw new Error('Current-only pointer has an unexpected gzip asset identity')
+    }
     declaredBytes += pointer.currentOnly.bytes
     if (declaredBytes > maxTotalBytes) {
       throw new Error('Current-only tail exceeds bounded total byte budget')
