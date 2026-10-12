@@ -60,6 +60,28 @@ describe('isolated D5 relay Current-only allowlist', () => {
     expect(fetchUpstream).toHaveBeenCalledTimes(1)
   })
 
+  it('permits a bounded immutable gzip D4 bucket only with matching checkpoint Release', async () => {
+    const upstream = new Response('zip', { headers: { 'content-length': '3' } })
+    Object.defineProperty(upstream, 'url', { value: 'https://release-assets.githubusercontent.com/zip' })
+    const fetchUpstream = vi.fn().mockResolvedValue(upstream)
+    vi.stubGlobal('fetch', fetchUpstream)
+    const good = await relay.fetch(new Request(
+      'https://example.test/artifacts/db-less-current-overlay-v1-100/current-overlay-v1-100-bucket-0001.json.gz',
+    ))
+    expect(good.status).toBe(200)
+    const wrongLedger = await relay.fetch(new Request(
+      'https://example.test/artifacts/db-less-current-overlay-v1-100/current-overlay-v1-200-bucket-0001.json.gz',
+    ))
+    const wrongClass = await relay.fetch(new Request(
+      `https://example.test/artifacts/${TAG}/current-overlay-v1-100-bucket-0001.json.gz`,
+    ))
+    const fakeManifest = await relay.fetch(new Request(
+      'https://example.test/artifacts/db-less-current-overlay-v1-100/current-overlay-v1-100-manifest.json.gz',
+    ))
+    expect([wrongLedger.status, wrongClass.status, fakeManifest.status]).toEqual([400, 400, 400])
+    expect(fetchUpstream).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects cross-class and unversioned Current-only paths without upstream fetch', async () => {
     const requestUpstream = vi.fn()
     vi.stubGlobal('fetch', requestUpstream)
