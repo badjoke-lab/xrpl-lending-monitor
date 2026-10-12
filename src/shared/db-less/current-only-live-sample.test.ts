@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sha256Hex } from '../current-state/canonical-json'
+import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import { decodeAndVerifyNormalizedPayloadChunk } from '../portable-collector-payload'
 import type { DbLessLiveDeltaArtifactSet } from './live-delta'
 import { assertDbLessLiveDeltaManifest, type DbLessArtifact, type DbLessLiveDeltaManifestV1 } from './live-delta'
@@ -76,6 +76,8 @@ describe('isolated real D3 Current-only sample (read-only)', () => {
     } as DbLessLiveDeltaArtifactSet
 
     const built=await buildDbLessCurrentOnlyArtifactV1(delta)
+    const uncompressedBytes = utf8(`${canonicalJson(built.manifest)}\n`).byteLength
+    expect(built.artifact.bytes.byteLength).toBeLessThan(uncompressedBytes)
     expect(built.manifest.records.length).toBe(candidate.currentProjectionMutations)
     expect(built.artifact.bytes.byteLength).toBeLessThan(2_000_001)
     console.log('D5_REAL_CURRENT_ONLY_SAMPLE='+JSON.stringify({
@@ -88,6 +90,8 @@ describe('isolated real D3 Current-only sample (read-only)', () => {
       mutationCount:candidate.currentProjectionMutations,
       newAssetRequests:1,
       newAssetBytes:built.artifact.bytes.byteLength,
+      uncompressedCurrentOnlyBytes:uncompressedBytes,
+      gzipCompressionFactor:Math.round(uncompressedBytes/built.artifact.bytes.byteLength*100)/100,
       savingsFactor:Math.round(aggregateSourceBytes/built.artifact.bytes.byteLength*100)/100,
       newAssetSha256:built.artifact.sha256,
       publicationMutation:false,
