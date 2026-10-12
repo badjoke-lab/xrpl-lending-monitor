@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import { buildDbLessChannel, encodeDbLessChannel } from './channel'
+import { gzipDbLessCurrentOnlyJson } from './current-only-gzip'
 import { readPublicCurrentOnlyTailAfterCheckpoint } from './current-tail-github-public'
 
 const REPO = 'badjoke-lab/xrpl-lending-monitor'
 const TAG = 'db-less-live-channel-candidate-v1'
 const ASSET_TAG = 'db-less-live-data-v1-20261012-12'
 const GENERATION = 'live-v1-101-102-aaaaaaaaaaaaaaaa-cccccccccccc'
-const KEY = `${GENERATION}-current-only-v1.json`
+const KEY = `${GENERATION}-current-only-v1.json.gz`
 const HASH = 'A'.repeat(64)
 const BASE_HASH = 'B'.repeat(64)
 const START_HASH = 'C'.repeat(64)
@@ -25,9 +26,10 @@ const CHECKPOINT = {
   throughLedgerHash: BASE_HASH,
 }
 
-function responseWithUrl(body: string, url: string): Response {
-  const response = new Response(body, {
-    headers: { 'content-length': String(utf8(body).byteLength) },
+function responseWithUrl(body: string | Uint8Array, url: string): Response {
+  const encoded = typeof body === 'string' ? utf8(body) : body
+  const response = new Response(new Uint8Array(encoded), {
+    headers: { 'content-length': String(encoded.byteLength) },
   })
   Object.defineProperty(response, 'url', { value: url })
   return response
@@ -61,6 +63,7 @@ async function fixture(options: { legacy?: boolean; corrupt?: boolean } = {}) {
     }],
   }
   const text = `${canonicalJson(document)}\n`
+  const compressed = await gzipDbLessCurrentOnlyJson(text)
   const channel = await buildDbLessChannel({
     schemaVersion: 1,
     network: 'devnet',
@@ -109,8 +112,8 @@ async function fixture(options: { legacy?: boolean; corrupt?: boolean } = {}) {
         ...(options.legacy ? {} : {
           currentOnly: {
             key: KEY,
-            sha256: await sha256Hex(utf8(text)),
-            bytes: utf8(text).byteLength,
+            sha256: await sha256Hex(compressed),
+            bytes: compressed.byteLength,
             sourceDeltaManifestSha256: SOURCE,
           },
         }),
@@ -136,7 +139,7 @@ async function fixture(options: { legacy?: boolean; corrupt?: boolean } = {}) {
       }), apiUrl)
     }
     if (url === assetUrl) {
-      return responseWithUrl(options.corrupt ? 'corrupt' : text,
+      return responseWithUrl(options.corrupt ? 'corrupt' : compressed,
         'https://release-assets.githubusercontent.com/immutable')
     }
     throw new Error(`Unexpected read: ${url}`)
