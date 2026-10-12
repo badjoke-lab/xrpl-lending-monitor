@@ -76,16 +76,25 @@ export function assertDbLessCurrentOnlyArtifactV1(
   if (document.currentProjectionMutations !== document.records.length) {
     throw new Error('Current-only mutation count does not match records')
   }
-  const seen = new Set<string>()
+  // One object can legitimately mutate more than once during a D3 generation.
+  // Preserve *every* mutation in the source sequence, including an upsert
+  // followed by a tombstone. D3 orders Current records by ledger, key, tx.
+  let previous: NormalizedCandidateV1 | null = null
   for (const record of document.records) {
     if (record.semanticClass !== 'current-projection') {
       throw new Error('Current-only artifact contains a non-Current record')
     }
     assertIdentity(record.canonicalKey, 'canonicalKey')
-    if (seen.has(record.canonicalKey)) {
-      throw new Error('Current-only artifact contains a duplicate canonical key')
+    if (previous && (
+      record.sourceLedgerIndex < previous.sourceLedgerIndex
+      || (record.sourceLedgerIndex === previous.sourceLedgerIndex
+        && (record.canonicalKey.localeCompare(previous.canonicalKey) < 0
+          || (record.canonicalKey === previous.canonicalKey
+            && (record.sourceTransactionHash ?? '').localeCompare(previous.sourceTransactionHash ?? '') < 0)))
+    )) {
+      throw new Error('Current-only artifact mutation order differs from D3 source order')
     }
-    seen.add(record.canonicalKey)
+    previous = record
     if (!Number.isSafeInteger(record.sourceLedgerIndex)
       || record.sourceLedgerIndex < document.startLedgerIndex
       || record.sourceLedgerIndex > document.endLedgerIndex) {
