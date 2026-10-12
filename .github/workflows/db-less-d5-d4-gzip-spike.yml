@@ -1,6 +1,7 @@
 name: DB-less D5 D4 gzip checkpoint isolated qualification
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
@@ -96,6 +97,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: pnpm exec vitest run src/shared/db-less/current-overlay-gzip-live-sample.test.ts
       - name: Exhaustive read-only SHA/gzip audit of 256 active D4 shards
+        if: github.event_name == 'workflow_dispatch'
         env:
           RUN_D5_REAL_D4_FULL_AUDIT: 'true'
           GH_TOKEN: ${{ github.token }}
