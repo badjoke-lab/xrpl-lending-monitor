@@ -176,6 +176,74 @@ export async function prepareDbLessStableD4CheckpointV3(options: {
   return { manifest, manifestArtifact, uploadArtifacts: plan.uploadArtifacts, retainedReleaseTags: plan.retainedReleaseTags }
 }
 
+/**
+ * Bounded v3 exact lookup. One SHA-verified stable bucket at most (zero
+ * if empty). This is a partial read: the whole-state digest is established
+ * separately by the full read/audit; manifest SHA and bucket SHA bind the
+ * individual response to the trusted checkpoint identity.
+ */
+export async function getDbLessStableD4ObjectV3(options: {
+  manifestBytes: Uint8Array
+  manifestSha256: string
+  objectType: 'vault' | 'loan_broker' | 'loan'
+  objectId: string
+  readArtifact: DbLessStableD4ReferencedReaderV3
+}): Promise<{ item: DbLessCurrentOverlayEntryV1 | null; shardReads: number }> {
+  if (!HASH.test(options.manifestSha256) || options.manifestBytes.byteLength > 1_000_000
+    || await sha256Hex(options.manifestBytes) !== options.manifestSha256) {
+    throw new Error('D4 v3 exact lookup manifest SHA or byte bound mismatch')
+  }
+  const source = new TextDecoder('utf-8', { fatal: true }).decode(options.manifestBytes)
+  const m = JSON.parse(source) as DbLessStableD4CheckpointV3
+  assertDbLessStableD4CheckpointV3(m)
+  if (source !== `${canonicalJson(m)}\n`) {
+    throw new Error('D4 v3 exact lookup manifest is noncanonical')
+  }
+  if (!options.objectId || options.objectId.length > 256) {
+    throw new Error('D4 v3 exact lookup object ID is invalid')
+  }
+  const key = buildDbLessCurrentProjectionCanonicalKey(options.objectType, options.objectId)
+  const digest = await sha256Hex(utf8(key))
+  const bucket = Number.parseInt(digest.slice(0, 8), 16) % m.bucketCount
+  const shard = m.shards.find(ref => ref.bucket === bucket)
+  if (!shard) return { item: null, shardReads: 0 }
+
+  const bytes = await options.readArtifact(shard.releaseTag, shard.key)
+  if (!bytes || bytes.byteLength !== shard.bytes || await sha256Hex(bytes) !== shard.sha256) {
+    throw new Error('D4 v3 exact lookup referenced immutable shard is missing or tampered')
+  }
+  const text = await decompressDbLessD4Shard(bytes, shard.uncompressedBytes)
+  if (utf8(text).byteLength !== shard.uncompressedBytes) {
+    throw new Error('D4 v3 exact lookup decoded byte count mismatch')
+  }
+  const payload = JSON.parse(text) as {
+    schemaVersion: number; network: string; epochId: string; baseIdentity: string;
+    bucket: number; bucketCount: number; records: DbLessCurrentOverlayEntryV1[]
+  }
+  if (text !== `${canonicalJson(payload)}\n`
+    || payload.schemaVersion !== 1 || payload.network !== 'devnet'
+    || payload.epochId !== m.epochId || payload.baseIdentity !== m.baseIdentity
+    || payload.bucket !== bucket || payload.bucketCount !== m.bucketCount
+    || !Array.isArray(payload.records) || payload.records.length !== shard.records) {
+    throw new Error('D4 v3 exact lookup shard identity/count mismatch')
+  }
+  let previous = ''
+  let found: DbLessCurrentOverlayEntryV1 | null = null
+  for (const entry of payload.records) {
+    verifyEntry(entry, m)
+    if (previous && entry.canonicalKey <= previous) {
+      throw new Error('D4 v3 exact lookup shard record order/uniqueness invalid')
+    }
+    previous = entry.canonicalKey
+    const membership = await sha256Hex(utf8(entry.canonicalKey))
+    if (Number.parseInt(membership.slice(0, 8), 16) % m.bucketCount !== bucket) {
+      throw new Error('D4 v3 exact lookup shard membership invalid')
+    }
+    if (entry.canonicalKey === key) found = entry
+  }
+  return { item: found, shardReads: 1 }
+}
+
 export async function readDbLessStableD4CheckpointV3(options: {
   manifestBytes: Uint8Array
   manifestSha256: string
