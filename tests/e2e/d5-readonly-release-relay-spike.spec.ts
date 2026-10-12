@@ -60,6 +60,7 @@ test('isolated Worker relay: browser reads exact D2+D4 bytes and SHA', async ({ 
           sha256: sha,
           expectedSha256: scenario.expectedSha256,
           cors: response.headers.get('access-control-allow-origin'),
+          errorBody: response.ok ? null : new TextDecoder().decode(bytes).slice(0,120),
           ok: response.ok && sha === scenario.expectedSha256 &&
             (scenario.expectedSize < 0 || bytes.length === scenario.expectedSize),
         })
@@ -127,7 +128,7 @@ test('real browser reads D2 lookup, D4 shard and D3 live assets with exact SHA',
     const baseLookup = baseRelease.assets.find((value) => /^lookup-[0-9A-F]+\.json\.gz$/.test(value.name))
     if (!baseLookup || !d3Chunk) throw Error('Required actual D2/D3 asset not found')
     const d4ManifestResponse = await fetch(`${relay}/artifacts/${d4.active.location.releaseTag}/${d4.active.manifestKey}`)
-    if (!d4ManifestResponse.ok) throw Error('D4 relay manifest unavailable')
+    if (!d4ManifestResponse.ok) throw Error(`D4 relay manifest unavailable: HTTP ${d4ManifestResponse.status}: ${(await d4ManifestResponse.text()).slice(0,120)}`)
     const d4Manifest = await d4ManifestResponse.json() as {
       shards: Array<{ key: string; bytes: number; artifactSha256: string }>
     }
@@ -170,6 +171,7 @@ test('real browser reads D2 lookup, D4 shard and D3 live assets with exact SHA',
         digestOk: sha === asset.sha,
         bytesOk: asset.bytes < 0 || payload.byteLength === asset.bytes,
         cors: response.headers.get('access-control-allow-origin'),
+        errorBody: response.ok ? null : new TextDecoder().decode(payload).slice(0,120),
       })
     }
     return findings
