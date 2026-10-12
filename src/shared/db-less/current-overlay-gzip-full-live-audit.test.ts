@@ -41,7 +41,9 @@ async function bounded(url: string, maxBytes: number): Promise<Uint8Array> {
     try {
       response = await fetch(url, {
         redirect: 'follow',
-        headers: { Accept: 'application/octet-stream' },
+        headers: new URL(url).hostname === 'api.github.com' && process.env.GH_TOKEN
+          ? { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json' }
+          : { Accept: 'application/octet-stream' },
         signal: AbortSignal.timeout(60_000),
       })
     } catch {
