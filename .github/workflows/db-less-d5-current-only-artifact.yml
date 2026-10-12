@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'src/shared/db-less/current-only-artifact.ts'
+      - 'src/shared/db-less/current-only-gzip.ts'
+      - 'src/shared/db-less/current-only-gzip.test.ts'
       - 'src/shared/db-less/current-only-artifact.test.ts'
       - 'src/shared/db-less/current-only-live-sample.test.ts'
       - 'src/shared/db-less/current-only-tail-reader.ts'
@@ -49,6 +51,8 @@ jobs:
         run: >-
           pnpm exec eslint
           src/shared/db-less/current-only-artifact.ts
+          src/shared/db-less/current-only-gzip.ts
+          src/shared/db-less/current-only-gzip.test.ts
           src/shared/db-less/current-only-artifact.test.ts
           src/shared/db-less/current-only-live-sample.test.ts
           src/shared/db-less/current-only-tail-reader.ts
@@ -60,7 +64,7 @@ jobs:
           src/shared/db-less/live-publication.test.ts
           scripts/prepare-db-less-live-run.ts
       - name: Verify Current-only provenance and negative cases
-        run: pnpm exec vitest run src/shared/db-less/current-only-artifact.test.ts src/shared/db-less/current-only-tail-reader.test.ts src/shared/db-less/current-tail-github-public-current-only.test.ts src/shared/db-less/live-publication.test.ts src/shared/db-less/channel.test.ts
+        run: pnpm exec vitest run src/shared/db-less/current-only-artifact.test.ts src/shared/db-less/current-only-gzip.test.ts src/shared/db-less/current-only-tail-reader.test.ts src/shared/db-less/current-tail-github-public-current-only.test.ts src/shared/db-less/live-publication.test.ts src/shared/db-less/channel.test.ts
       - name: Read-only measurement of actual D3 Current-only asset
         env:
           RUN_D5_REAL_CURRENT_SAMPLE: 'true'
