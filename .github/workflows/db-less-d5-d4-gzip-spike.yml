@@ -7,6 +7,7 @@ on:
       - 'src/shared/db-less/current-overlay-compressed-shard.ts'
       - 'src/shared/db-less/current-overlay-compressed-shard.test.ts'
       - 'src/shared/db-less/current-overlay-gzip-live-sample.test.ts'
+      - 'src/shared/db-less/current-overlay-gzip-full-live-audit.test.ts'
       - 'src/shared/db-less/current-overlay-stable-shard-plan.ts'
       - 'src/shared/db-less/current-overlay-stable-shard-plan.test.ts'
       - 'src/shared/db-less/current-overlay-stable-checkpoint-v3.ts'
@@ -60,6 +61,7 @@ jobs:
           src/shared/db-less/current-overlay-compressed-shard.ts
           src/shared/db-less/current-overlay-compressed-shard.test.ts
           src/shared/db-less/current-overlay-gzip-live-sample.test.ts
+          src/shared/db-less/current-overlay-gzip-full-live-audit.test.ts
           src/shared/db-less/current-overlay-stable-shard-plan.ts
           src/shared/db-less/current-overlay-stable-shard-plan.test.ts
           src/shared/db-less/current-overlay-stable-checkpoint-v3.ts
@@ -92,3 +94,8 @@ jobs:
         env:
           RUN_D5_REAL_D4_GZIP_SAMPLE: 'true'
         run: pnpm exec vitest run src/shared/db-less/current-overlay-gzip-live-sample.test.ts
+      - name: Exhaustive read-only SHA/gzip audit of 256 active D4 shards
+        env:
+          RUN_D5_REAL_D4_FULL_AUDIT: 'true'
+        run: pnpm exec vitest run src/shared/db-less/current-overlay-gzip-full-live-audit.test.ts
+
