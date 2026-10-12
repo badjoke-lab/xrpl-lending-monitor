@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
+import { canonicalJson, sha256Hex } from '../current-state/canonical-json'
+import { gzipDbLessCurrentOnlyJson } from './current-only-gzip'
 import type { DbLessChannelV1 } from './channel'
 import {
   readDbLessCurrentOnlyTailV1,
@@ -42,8 +43,8 @@ async function fixture() {
       value: null,
     }],
   }
-  const bytes = utf8(`${canonicalJson(document)}\n`)
-  const key = `${GENERATION}-current-only-v1.json`
+  const bytes = await gzipDbLessCurrentOnlyJson(`${canonicalJson(document)}\n`)
+  const key = `${GENERATION}-current-only-v1.json.gz`
   const channel = {
     network: 'devnet',
     epochId: 'epoch-1',
