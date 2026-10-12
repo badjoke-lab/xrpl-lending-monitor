@@ -47,21 +47,33 @@ export default {
       return respond(400, 'Base artifact has incorrect Release class')
     }
     const url = `https://github.com/${REPO}/releases/download/${tag}/${file}`
-    let upstream: Response
-    try {
-      upstream = await fetch(url, {
-        method: request.method,
-        redirect: 'follow',
-        headers: { Accept: 'application/octet-stream' },
-      })
-    } catch {
-      return respond(502, 'Upstream fetch failed')
+    let upstream: Response | null = null
+    // Retry only transport/temporary upstream failures. Never retry 404/403
+    // or silently treat missing immutable bytes as an empty artifact.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        upstream = await fetch(url, {
+          method: request.method,
+          redirect: 'follow',
+          headers: { Accept: 'application/octet-stream' },
+        })
+      } catch {
+        upstream = null
+      }
+      if (upstream?.ok) break
+      const temporary = upstream === null
+        || upstream.status === 429
+        || (upstream.status >= 500 && upstream.status <= 599)
+      if (!temporary || attempt === 2) break
     }
+    if (upstream === null) return respond(502, 'Upstream fetch failed after bounded retries')
     const finalUrl = new URL(upstream.url)
     if (finalUrl.protocol !== 'https:' || !ALLOWED_REDIRECT_HOSTS.has(finalUrl.hostname)) {
       return respond(502, 'Unexpected upstream redirect')
     }
-    if (!upstream.ok) return respond(502, 'Upstream artifact unavailable')
+    if (!upstream.ok) {
+      return respond(502, `Upstream artifact unavailable (HTTP ${upstream.status})`)
+    }
     const contentLength = upstream.headers.get('content-length')
     if (contentLength !== null) {
       const size = Number(contentLength)
