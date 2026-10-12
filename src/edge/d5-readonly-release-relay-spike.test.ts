@@ -82,6 +82,27 @@ describe('isolated D5 relay Current-only allowlist', () => {
     expect(fetchUpstream).toHaveBeenCalledTimes(1)
   })
 
+  it('allows SHA-named v3 shards on pinned D5 Releases and rejects cross-class Release tags', async () => {
+    const upstream = new Response('compressed', {headers:{'content-length':'10'}})
+    Object.defineProperty(upstream,'url',{value:'https://release-assets.githubusercontent.com/pinned'})
+    const getUpstream = vi.fn().mockResolvedValue(upstream)
+    vi.stubGlobal('fetch',getUpstream)
+    const tag='d5-stable-d4-v3-101'
+    const name=`current-overlay-stable-v1-b0002-${'a'.repeat(64)}.json.gz`
+    const shard=await relay.fetch(new Request(`https://example.test/artifacts/${tag}/${name}`))
+    expect(shard.status).toBe(200)
+    const manifest=await relay.fetch(new Request(`https://example.test/artifacts/${tag}/current-overlay-v3-101-manifest.json`))
+    expect(manifest.status).toBe(200)
+    for(const [badTag,badName] of [
+      [tag,'current-overlay-v3-100-manifest.json'],
+      ['db-less-current-overlay-v1-101',name],
+      [tag,'current-overlay-stable-v1-b0002-INVALID.json.gz'],
+    ]) {
+      expect((await relay.fetch(new Request(`https://example.test/artifacts/${badTag}/${badName}`))).status).toBe(400)
+    }
+    expect(getUpstream).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects cross-class and unversioned Current-only paths without upstream fetch', async () => {
     const requestUpstream = vi.fn()
     vi.stubGlobal('fetch', requestUpstream)
