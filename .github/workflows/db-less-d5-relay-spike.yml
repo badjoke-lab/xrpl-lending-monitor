@@ -40,7 +40,7 @@ jobs:
           cat /tmp/d5-relay-spike.log
           exit 1
       - name: Chromium cross-origin immutable byte/digest probe
-        run: pnpm exec playwright test tests/e2e/d5-readonly-release-relay-spike.spec.ts --project=chromium --retries=0
+        run: pnpm exec playwright test tests/e2e/d5-readonly-release-relay-spike.spec.ts --project=chromium --retries=0 --workers=1
       - name: Upload isolated transport evidence
         if: always()
         uses: actions/upload-artifact@v4
