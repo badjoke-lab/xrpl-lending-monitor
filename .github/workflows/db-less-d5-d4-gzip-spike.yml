@@ -1,0 +1,69 @@
+name: DB-less D5 D4 gzip checkpoint isolated qualification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/shared/db-less/current-overlay-compressed-shard.ts'
+      - 'src/shared/db-less/current-overlay-compressed-shard.test.ts'
+      - 'src/shared/db-less/current-overlay-gzip-live-sample.test.ts'
+      - 'src/shared/db-less/current-overlay-checkpoint.ts'
+      - 'src/shared/db-less/current-overlay-reader.ts'
+      - 'src/shared/db-less/live-delta.ts'
+      - 'scripts/build-db-less-current-overlay-checkpoint.ts'
+      - 'scripts/publish-db-less-current-overlay-checkpoint.ts'
+      - '.github/workflows/db-less-d5-d4-gzip-spike.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-gzip-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Compile D4 builder/publisher without invoking their commands
+        run: |
+          pnpm build:db-less-current-overlay-checkpoint
+          pnpm build:db-less-current-overlay-publisher
+      - name: Assert production D4 activation remains unmodified and opt-out
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Fq -- '--gzip-shards' .github/workflows/db-less-d4-current-overlay-activate.yml; then
+            echo 'D4 production activation must not enable isolated D5 gzip' >&2
+            exit 1
+          fi
+      - name: Typecheck worker and app
+        run: |
+          pnpm exec tsc -p tsconfig.worker.json --noEmit
+          pnpm exec tsc -p tsconfig.app.json --noEmit
+      - name: Lint gzip conversion and publisher
+        run: >-
+          pnpm exec eslint
+          src/shared/db-less/current-overlay-compressed-shard.ts
+          src/shared/db-less/current-overlay-compressed-shard.test.ts
+          src/shared/db-less/current-overlay-gzip-live-sample.test.ts
+          src/shared/db-less/current-overlay-checkpoint.ts
+          src/shared/db-less/current-overlay-reader.ts
+          src/shared/db-less/live-delta.ts
+          scripts/build-db-less-current-overlay-checkpoint.ts
+          scripts/publish-db-less-current-overlay-checkpoint.ts
+      - name: Validate D4 gzip and legacy state equivalence
+        run: >-
+          pnpm exec vitest run
+          src/shared/db-less/current-overlay-compressed-shard.test.ts
+          src/shared/db-less/current-overlay-checkpoint.test.ts
+          src/shared/db-less/current-overlay-reader.test.ts
+          src/shared/db-less/current-overlay-equivalence.test.ts
+          src/shared/db-less/current-overlay-retention.test.ts
+      - name: Bounded read-only measurement of actual D4 shards
+        env:
+          RUN_D5_REAL_D4_GZIP_SAMPLE: 'true'
+        run: pnpm exec vitest run src/shared/db-less/current-overlay-gzip-live-sample.test.ts
