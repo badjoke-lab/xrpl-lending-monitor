@@ -6,6 +6,7 @@ import {
   type DbLessCurrentOverlayPointerV1,
 } from '../src/shared/db-less/current-overlay-channel'
 import { GitHubReleaseCurrentOverlayChannelStore } from '../src/shared/db-less/current-overlay-channel-github-release'
+import { assertDbLessD4ActivationTailSafety } from '../src/shared/db-less/current-overlay-activation-tail-guard'
 import {
   dbLessCurrentOverlayManifestProvenance,
   type DbLessCurrentOverlayCheckpointManifest,
@@ -22,6 +23,7 @@ type RehearsalSummary = {
   repository: string
   channelReleaseTag: string
   channelSha256: string
+  seedThroughLedgerIndex?: number | null
   baseIdentity: string
   throughLedgerIndex: number
   throughLedgerHash: string
@@ -90,6 +92,13 @@ function assertSummary(summary: RehearsalSummary, repository: string): void {
     throw new Error('tombstoneCount is invalid')
   }
   digest(summary.channelSha256, 'channelSha256')
+  if (summary.seedThroughLedgerIndex !== undefined && summary.seedThroughLedgerIndex !== null) {
+    if (!Number.isSafeInteger(summary.seedThroughLedgerIndex)
+      || summary.seedThroughLedgerIndex < 1
+      || summary.seedThroughLedgerIndex >= summary.throughLedgerIndex) {
+      throw new Error('D4 publication seed checkpoint ledger is invalid')
+    }
+  }
   digest(summary.manifestSha256, 'manifestSha256')
   digest(summary.equivalence.sourceStateSha256, 'sourceStateSha256')
   digest(summary.equivalence.checkpointStateSha256, 'checkpointStateSha256')
@@ -264,6 +273,30 @@ async function main(): Promise<void> {
   const current = await channelStore.read()
   const pointer = activePointer({ repository, checkpointReleaseTag, summary })
 
+  // A 257-asset upload may span multiple five-minute D3 generations. Do not
+  // activate an old checkpoint after its indexed Current delta tail has aged
+  // out. This check MUST be done immediately before the D4 channel CAS.
+  const latestSourceStore = new GitHubReleaseDbLessStore({
+    repository,
+    releaseTag: summary.channelReleaseTag,
+    token,
+    maxAssets: 1,
+  })
+  const latestSource = await latestSourceStore.readChannel()
+  if (!latestSource) throw new Error('D4 activation latest D3 channel is absent')
+  const tailSafety = assertDbLessD4ActivationTailSafety({
+    checkpoint: manifest,
+    currentD3: latestSource.channel,
+  })
+  if (current && summary.seedThroughLedgerIndex !== undefined
+    && summary.seedThroughLedgerIndex !== null
+    && current.channel.active.throughLedgerIndex !== summary.seedThroughLedgerIndex) {
+    throw new Error('D4 active checkpoint changed since the verified seed rehearsal')
+  }
+  if (current && current.channel.active.throughLedgerIndex > pointer.throughLedgerIndex) {
+    throw new Error('D4 publication would roll the active checkpoint backward')
+  }
+
   let channelAlreadyActive = false
   let published = current
   if (current && canonicalJson(current.channel.active) === canonicalJson(pointer)) {
@@ -310,6 +343,7 @@ async function main(): Promise<void> {
     channelAlreadyActive,
     channelSha256: readback.channel.channelSha256,
     channelRevision: readback.revision,
+    activationTailSafety: tailSafety,
   }
   await writeFile(output, `${canonicalJson(result)}\n`, 'utf8')
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)

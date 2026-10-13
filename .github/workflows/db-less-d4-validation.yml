@@ -29,6 +29,8 @@ on:
       - 'src/shared/db-less/current-overlay-equivalence.test.ts'
       - 'src/shared/db-less/current-overlay-retention.ts'
       - 'src/shared/db-less/current-overlay-retention.test.ts'
+      - 'src/shared/db-less/current-overlay-activation-tail-guard.ts'
+      - 'src/shared/db-less/current-overlay-activation-tail-guard.test.ts'
       - 'src/shared/db-less/current-overlay-channel.ts'
       - 'src/shared/db-less/current-overlay-channel.test.ts'
       - 'src/shared/db-less/current-overlay-channel-github-release.ts'
@@ -94,6 +96,8 @@ jobs:
           src/shared/db-less/current-overlay-equivalence.test.ts
           src/shared/db-less/current-overlay-retention.ts
           src/shared/db-less/current-overlay-retention.test.ts
+          src/shared/db-less/current-overlay-activation-tail-guard.ts
+          src/shared/db-less/current-overlay-activation-tail-guard.test.ts
           src/shared/db-less/current-overlay-channel.ts
           src/shared/db-less/current-overlay-channel.test.ts
           src/shared/db-less/current-overlay-channel-github-release.ts
@@ -164,6 +168,7 @@ jobs:
           src/shared/db-less/current-overlay-equivalence.test.ts
           src/shared/db-less/current-overlay-retention.test.ts
           src/shared/db-less/current-overlay-channel.test.ts
+          src/shared/db-less/current-overlay-activation-tail-guard.test.ts
           src/shared/db-less/current-overlay-channel-github-release.test.ts
           src/shared/db-less/current-composite-reader.test.ts
           src/shared/db-less/github-release-publication.test.ts
