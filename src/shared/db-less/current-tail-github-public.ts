@@ -193,6 +193,7 @@ export async function readPublicCurrentTailAfterCheckpoint(options: {
   fetcher?: typeof fetch
   maxArtifactBytes?: number
   maxNewGenerations?: number
+  relayOrigin?: string
 }): Promise<PublicCurrentTailResult> {
   const channel = await openPublicGithubDbLessChannel({
     repository: options.repository,
@@ -207,6 +208,7 @@ export async function readPublicCurrentTailAfterCheckpoint(options: {
     repository: options.repository,
     fetcher: options.fetcher,
     maxArtifactBytes: options.maxArtifactBytes,
+    relayOrigin: options.relayOrigin,
   })
   const readChainArtifact = (pointer: DbLessLivePointerV1) =>
     readLocatedArtifact(pointer.location, pointer.manifestKey)
@@ -241,6 +243,7 @@ export async function readPublicIndexedCurrentTailAfterCheckpoint(options: {
   fetcher?: typeof fetch
   maxArtifactBytes?: number
   maxMutationGenerations?: number
+  relayOrigin?: string
 }): Promise<PublicIndexedCurrentTailResult> {
   const channel = await openPublicGithubDbLessChannel({
     repository: options.repository,
@@ -306,6 +309,7 @@ export async function readPublicIndexedCurrentTailAfterCheckpoint(options: {
     repository: options.repository,
     fetcher: options.fetcher,
     maxArtifactBytes: options.maxArtifactBytes,
+    relayOrigin: options.relayOrigin,
   })
   const generations: DbLessCurrentOverlayGenerationV1[] = []
   for (const pointer of selected) {
