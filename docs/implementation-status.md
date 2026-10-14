@@ -248,6 +248,15 @@ D5 is **ACTIVE / BLOCKED**. Static Vault detail candidate code and build are imp
 
 The current design must NOT be promoted as a functional static UI or formal Devnet release. `VITE_STATIC_CURRENT_ENABLED` remains OFF in public operation. Source-of-truth proof: Issue #1739 CORS decision comment `6110163222`, free-tier envelope comment `6110185398`. D2 current base is 862,106,011 bytes (860 assets), D4 active checkpoint 177,191,267 bytes (257 assets); this excludes the tail and history. A new asset-delivery architecture must earn explicit real-browser SHA/size, bounded query, freshness and free-envelope proofs. D4 collector/compaction evidence remains independently valid; D5 blockage does not imply D1/Queue/Supabase recovery or XRPL.to is in scope.
 
+## D4 production recovery and D5 relay integration update (2026-10-15 JST)
+
+The former D4 Current checkpoint stall is **resolved at the artifact/channel layer**.
+Owner-authorized production activation run [38509175167](https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/38509175167) succeeded, advanced the D4 checkpoint **6,036,655 → 6,106,866**, and published immutable checkpoint Release `db-less-current-overlay-v1-6106866` with all 257 assets verified before D4 channel activation. The run's state SHA-256 was `94c9ff085b1861ee50a996f4e6394a5d9a1b9484fe3aa254efe2fd1546306dcc`. D4 exit qualification [38592319135](https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/38592319135) was PASS. Independently triggered D5 static Current channel readiness [38592329502](https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/38592329502) was PASS: zero uncovered ledgers, fresh D3 channel, covered D4 checkpoint.
+
+**This is NOT the D5 browser/UI exit.** The browser CORS restriction described above still applies when consumers attempt to fetch direct GitHub Release asset bytes. The new candidate is an opt-in strict browser transport that rewrites *only* immutable D2/D3/D4 Release asset requests to a configured HTTPS read-only relay; API channel metadata stays direct, and all existing integrity/provenance validation remains in the consumer. `VITE_STATIC_CURRENT_ENABLED` remains OFF in public operation, and `VITE_STATIC_RELEASE_RELAY_ORIGIN` must reference a verified deployed relay before any client promotion.
+
+Source proofs for the isolated client implementation are Draft PR #1763, run [38593858260](https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/38593858260) and D5 static UI validation [38593858312](https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/38593858312); TypeScript, simulated strict route/origin/byte-digest tests and a static bundle build PASS. **Mocked fetch tests are not a genuine independent-browser CORS proof.** The independent browser proof requires a live isolated HTTPS relay URL and real immutable D2/D3/D4 asset reads, bounded response and SHA checks, correct Vault projection/tombstone behavior, free-tier measurement and then a separately authorized UI cutover.
+
 ## Release status
 
 Not formally released.

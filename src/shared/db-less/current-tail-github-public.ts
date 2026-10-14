@@ -79,6 +79,7 @@ async function boundedArtifact(options: {
   key: string
   fetcher: typeof fetch
   maxBytes: number
+  relayOrigin?: string
 }): Promise<Uint8Array | null> {
   if (options.location.repository !== options.repository) {
     throw new Error('D3 artifact location points to a different repository')
@@ -91,7 +92,7 @@ async function boundedArtifact(options: {
   if (!response.ok) {
     throw new Error(`D3 public artifact fetch failed with ${response.status}`)
   }
-  assertAllowedReleaseResponseOrigin(response.url)
+  assertAllowedReleaseResponseOrigin(response.url, options.relayOrigin)
   const length = response.headers.get('content-length')
   if (length !== null) {
     const parsed = Number(length)
@@ -160,6 +161,7 @@ export function createPublicGithubLocatedArtifactReader(options: {
   repository: string
   fetcher?: typeof fetch
   maxArtifactBytes?: number
+  relayOrigin?: string
 }) {
   const repo = repository(options.repository)
   const fetcher = options.fetcher ?? ((input, init) => fetch(input, init))
@@ -175,6 +177,7 @@ export function createPublicGithubLocatedArtifactReader(options: {
       key,
       fetcher,
       maxBytes,
+      relayOrigin: options.relayOrigin,
     })
 }
 
@@ -190,6 +193,7 @@ export async function readPublicCurrentTailAfterCheckpoint(options: {
   fetcher?: typeof fetch
   maxArtifactBytes?: number
   maxNewGenerations?: number
+  relayOrigin?: string
 }): Promise<PublicCurrentTailResult> {
   const channel = await openPublicGithubDbLessChannel({
     repository: options.repository,
@@ -204,6 +208,7 @@ export async function readPublicCurrentTailAfterCheckpoint(options: {
     repository: options.repository,
     fetcher: options.fetcher,
     maxArtifactBytes: options.maxArtifactBytes,
+    relayOrigin: options.relayOrigin,
   })
   const readChainArtifact = (pointer: DbLessLivePointerV1) =>
     readLocatedArtifact(pointer.location, pointer.manifestKey)
@@ -238,6 +243,7 @@ export async function readPublicIndexedCurrentTailAfterCheckpoint(options: {
   fetcher?: typeof fetch
   maxArtifactBytes?: number
   maxMutationGenerations?: number
+  relayOrigin?: string
 }): Promise<PublicIndexedCurrentTailResult> {
   const channel = await openPublicGithubDbLessChannel({
     repository: options.repository,
@@ -303,6 +309,7 @@ export async function readPublicIndexedCurrentTailAfterCheckpoint(options: {
     repository: options.repository,
     fetcher: options.fetcher,
     maxArtifactBytes: options.maxArtifactBytes,
+    relayOrigin: options.relayOrigin,
   })
   const generations: DbLessCurrentOverlayGenerationV1[] = []
   for (const pointer of selected) {
