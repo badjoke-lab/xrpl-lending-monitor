@@ -80,7 +80,7 @@ export function assertAllowedReleaseResponseOrigin(value: string, relayOrigin?: 
     if (trusted.protocol === 'https:' && trusted.pathname === '/'
       && !trusted.username && !trusted.password && !trusted.search && !trusted.hash
       && url.origin === trusted.origin
-      && /^\\/artifacts\\/[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+$/.test(url.pathname)
+      && /^\/artifacts\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(url.pathname)
       && !url.search && !url.hash) return
   }
   throw new Error('Release asset response origin is not allowed')
