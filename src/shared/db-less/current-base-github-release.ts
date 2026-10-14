@@ -54,6 +54,7 @@ export function createGithubReleaseBaseArtifactReader(options: {
   releaseTag: string
   manifest: DbLessBaseManifestV1
   fetcher?: typeof fetch
+  relayOrigin?: string
 }): DbLessBaseArtifactReader {
   const fetcher = options.fetcher ?? ((input, init) => fetch(input, init))
   const resolver = new GithubReleaseAssetResolver(options.repository, options.releaseTag)
@@ -66,7 +67,7 @@ export function createGithubReleaseBaseArtifactReader(options: {
     if (!response.ok) {
       throw new Error(`DB-less base Release asset fetch failed with ${response.status}`)
     }
-    assertAllowedReleaseResponseOrigin(response.url)
+    assertAllowedReleaseResponseOrigin(response.url, options.relayOrigin)
     const bytes = new Uint8Array(await response.arrayBuffer())
     if (bytes.byteLength !== descriptor.bytes) {
       throw new Error(`DB-less base Release asset size mismatch: ${key}`)
@@ -89,6 +90,7 @@ export async function openPublicGithubCurrentBase(options: {
   fetcher?: typeof fetch
   maxManifestBytes?: number
   maxAssetBytes?: number
+  relayOrigin?: string
 }): Promise<PublicCurrentBaseOpenResult> {
   const repo = repository(options.repository)
   const tag = releaseTag(options.releaseTag)
@@ -141,7 +143,7 @@ export async function openPublicGithubCurrentBase(options: {
   if (!manifestResponse.ok) {
     throw new Error(`DB-less base manifest fetch failed with ${manifestResponse.status}`)
   }
-  assertAllowedReleaseResponseOrigin(manifestResponse.url)
+  assertAllowedReleaseResponseOrigin(manifestResponse.url, options.relayOrigin)
   const manifestBytes = new Uint8Array(await manifestResponse.arrayBuffer())
   if (manifestBytes.byteLength !== manifestAsset.size) {
     throw new Error('DB-less base manifest byte size mismatch')
@@ -160,6 +162,7 @@ export async function openPublicGithubCurrentBase(options: {
       releaseTag: tag,
       manifest,
       fetcher,
+      relayOrigin: options.relayOrigin,
     }),
   })
   return { manifest, reader }
