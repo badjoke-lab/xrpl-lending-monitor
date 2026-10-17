@@ -8,6 +8,9 @@ on:
       - 'tsconfig.node.json'
       - 'scripts/build-db-less-current-overlay-checkpoint.ts'
       - 'scripts/publish-db-less-current-overlay-checkpoint.ts'
+      - 'src/shared/db-less/current-overlay-owner-opt-in.ts'
+      - 'src/shared/db-less/current-overlay-owner-opt-in.test.ts'
+      - '.github/workflows/db-less-d4-unattended-update.yml'
       - 'vite.db-less-current-overlay-checkpoint.config.ts'
       - 'vite.db-less-current-overlay-publisher.config.ts'
       - '.github/workflows/db-less-d4-current-overlay-rehearsal.yml'
@@ -98,8 +101,11 @@ jobs:
           src/shared/db-less/current-overlay-retention.test.ts
           src/shared/db-less/current-overlay-activation-tail-guard.ts
           src/shared/db-less/current-overlay-activation-tail-guard.test.ts
+          src/shared/db-less/current-overlay-owner-opt-in.ts
+          src/shared/db-less/current-overlay-owner-opt-in.test.ts
           src/shared/db-less/current-overlay-channel.ts
           src/shared/db-less/current-overlay-channel.test.ts
+          src/shared/db-less/current-overlay-owner-opt-in.test.ts
           src/shared/db-less/current-overlay-channel-github-release.ts
           src/shared/db-less/current-overlay-channel-github-release.test.ts
           src/shared/db-less/current-composite-reader.ts
