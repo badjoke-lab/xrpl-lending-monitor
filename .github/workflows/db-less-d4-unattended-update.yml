@@ -170,7 +170,7 @@ jobs:
           test "$latest_d4" = "${{ steps.assess.outputs.expected_d4_sha }}"
           latest_d3="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D3_TAG" --jq '.body')"
           jq -e --argjson head "${{ steps.assess.outputs.d3_head }}" '
-            . | fromjson | .lastCommittedLedgerIndex >= $head
+            .lastCommittedLedgerIndex >= $head
           ' <<< "$latest_d3" > /dev/null
           # Publisher independently rechecks Current tail coverage just
           # before CAS activation, after uploading immutable assets.
@@ -218,7 +218,7 @@ jobs:
           test "$(jq -er '.active.throughLedgerIndex' <<< "$current")" = "$published_ledger"
           latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D3_TAG" --jq '.body')"
           jq -e --argjson through "$published_ledger" '
-            . | fromjson | .currentProjectionTail.coverageStartLedgerIndex <= $through
+            .currentProjectionTail.coverageStartLedgerIndex <= $through
           ' <<< "$latest" >/dev/null
           echo "D4 AUTO UPDATE VERIFIED to ledger $published_ledger" >> "$GITHUB_STEP_SUMMARY"
 
