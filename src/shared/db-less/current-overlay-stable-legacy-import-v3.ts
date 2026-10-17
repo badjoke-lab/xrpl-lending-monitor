@@ -43,6 +43,28 @@ export async function prepareDbLessStableD4FromVerifiedV2(options: {
   ) {
     throw new Error('D4 v2 to v3 import source manifest/entry identity mismatch')
   }
+  const bucketIds = new Set<number>()
+  const assetKeys = new Set<string>()
+  let referencedRecords = 0
+  if (!Array.isArray(manifest.shards) || manifest.shards.length > manifest.bucketCount) {
+    throw new Error('D4 v2 to v3 import shard catalog is invalid')
+  }
+  for (const shard of manifest.shards) {
+    if (!Number.isSafeInteger(shard.bucket) || shard.bucket < 0
+      || shard.bucket >= manifest.bucketCount || bucketIds.has(shard.bucket)
+      || !shard.key || assetKeys.has(shard.key)
+      || !Number.isSafeInteger(shard.records) || shard.records < 1
+      || !Number.isSafeInteger(shard.bytes) || shard.bytes < 1
+      || !SHA.test(shard.artifactSha256)) {
+      throw new Error('D4 v2 to v3 import referenced shard catalog is malformed')
+    }
+    referencedRecords += shard.records
+    bucketIds.add(shard.bucket)
+    assetKeys.add(shard.key)
+  }
+  if (referencedRecords !== entries.length) {
+    throw new Error('D4 v2 to v3 import referenced shard record count mismatch')
+  }
   const ordered = [...entries].sort((a, b) =>
     compareDbLessCurrentProjectionCanonicalKeys(a.canonicalKey, b.canonicalKey))
   const sourceSha = await sha256Hex(`${canonicalJson(ordered)}\n`)
