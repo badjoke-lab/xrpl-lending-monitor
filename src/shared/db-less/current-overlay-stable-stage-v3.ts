@@ -37,7 +37,7 @@ export async function stageDbLessStableD4CandidateV3(options: {
   manifestUploaded: boolean
   stateSha256: string
   sourceThroughLedgerIndex: number
-  publicationMutation: false
+  immutableCandidateWrites: number
   channelActivationPerformed: false
 }> {
   const dryRun = await verifyDbLessStableD4PublicationPreflightV3({
@@ -103,7 +103,7 @@ export async function stageDbLessStableD4CandidateV3(options: {
     manifestUploaded,
     stateSha256: full.manifest.stateSha256,
     sourceThroughLedgerIndex: full.manifest.throughLedgerIndex,
-    publicationMutation: false,
+    immutableCandidateWrites: writtenShardAssets + (manifestUploaded ? 1 : 0),
     channelActivationPerformed: false,
   }
 }
