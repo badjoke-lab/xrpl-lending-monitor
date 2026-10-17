@@ -50,6 +50,19 @@ test('distinguishes an indexed coverage gap from proven loss of old Release chai
   assert.equal(blocked.uncoveredLedgers,1)
   assert.equal(blocked.coverageOk,false)
 })
+test('accepts sparse D3 Current mutation generations separated by no-op ledgers',()=>{
+  const input=fixture(228)
+  for (let i=1;i<input.d3.currentProjectionTail.generations.length;i++){
+    const generation=input.d3.currentProjectionTail.generations[i]
+    generation.startLedgerIndex+=2
+    generation.endLedgerIndex+=2
+  }
+  input.d3.lastCommittedLedgerIndex=230
+  const r=assessD4Maintenance(input)
+  assert.equal(r.status,'HEALTHY')
+  assert.equal(r.newIndexedGenerations,2)
+  assert.equal(r.checkpointLagLedgers,2)
+})
 test('stale D3 takes precedence over checkpoint pressure', () => {
   const input=fixture(170)
   input.d3.updatedAt=new Date(nowMs-1_200_000).toISOString()
@@ -63,7 +76,7 @@ test('refuses epochs, malformed ordering, checkpoint/hash mismatch and clocks', 
   assert.throws(()=>assessD4Maintenance(a),/epoch/)
   const b=fixture()
   b.d3.currentProjectionTail.generations[1].startLedgerIndex=500
-  assert.throws(()=>assessD4Maintenance(b),/contiguous/)
+  assert.throws(()=>assessD4Maintenance(b),/overlap/)
   const c=fixture(100)
   c.d4.active.throughLedgerHash='B'.repeat(64)
   assert.throws(()=>assessD4Maintenance(c),/hash/)
