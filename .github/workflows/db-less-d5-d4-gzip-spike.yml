@@ -19,6 +19,8 @@ on:
       - 'src/shared/db-less/current-overlay-stable-github-public-v3.test.ts'
       - 'src/shared/db-less/current-overlay-stable-publication-preflight-v3.ts'
       - 'src/shared/db-less/current-overlay-stable-publication-preflight-v3.test.ts'
+      - 'src/shared/db-less/current-overlay-stable-legacy-import-v3.ts'
+      - 'src/shared/db-less/current-overlay-stable-legacy-import-v3.test.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-reader.ts'
       - 'src/shared/db-less/live-delta.ts'
@@ -73,6 +75,8 @@ jobs:
           src/shared/db-less/current-overlay-stable-github-public-v3.test.ts
           src/shared/db-less/current-overlay-stable-publication-preflight-v3.ts
           src/shared/db-less/current-overlay-stable-publication-preflight-v3.test.ts
+          src/shared/db-less/current-overlay-stable-legacy-import-v3.ts
+          src/shared/db-less/current-overlay-stable-legacy-import-v3.test.ts
           src/shared/db-less/current-overlay-checkpoint.ts
           src/shared/db-less/current-overlay-reader.ts
           src/shared/db-less/live-delta.ts
@@ -87,6 +91,7 @@ jobs:
           src/shared/db-less/current-overlay-stable-retention-v3.test.ts
           src/shared/db-less/current-overlay-stable-github-public-v3.test.ts
           src/shared/db-less/current-overlay-stable-publication-preflight-v3.test.ts
+          src/shared/db-less/current-overlay-stable-legacy-import-v3.test.ts
           src/shared/db-less/current-overlay-checkpoint.test.ts
           src/shared/db-less/current-overlay-reader.test.ts
           src/shared/db-less/current-overlay-equivalence.test.ts
