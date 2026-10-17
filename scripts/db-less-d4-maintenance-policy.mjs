@@ -41,9 +41,9 @@ export function assessD4Maintenance({ d3, d4, nowMs, dueAt = 48, urgentAt = 80 }
   let previousEnd = indexedStart
   for (const gen of generations) {
     if (!POSITIVE(gen.startLedgerIndex) || !POSITIVE(gen.endLedgerIndex)
-      || gen.startLedgerIndex !== previousEnd + 1
+      || gen.startLedgerIndex <= previousEnd
       || gen.startLedgerIndex > gen.endLedgerIndex || gen.endLedgerIndex > head) {
-      throw new Error('D4 guard indexed Current generations are not contiguous')
+      throw new Error('D4 guard indexed Current generations overlap or reverse')
     }
     previousEnd = gen.endLedgerIndex
   }
