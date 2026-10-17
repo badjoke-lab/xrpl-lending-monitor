@@ -195,6 +195,10 @@ jobs:
 
       - name: Publish bounded immutable assets then atomically activate Current pointer
         if: steps.assess.outputs.should_build == 'true'
+        env:
+          # Rechecks the exact latest owner command inside the publisher,
+          # immediately before Current channel CAS (after shard uploads).
+          D4_UNATTENDED_OWNER_OPTIN_REQUIRED: 'true'
         run: >-
           node .db-less-current-overlay-publisher-build/publish-db-less-current-overlay-checkpoint.mjs
           --local
