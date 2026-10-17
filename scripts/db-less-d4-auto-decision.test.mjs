@@ -33,7 +33,9 @@ test('unattended update fires before eviction and escalates urgency',()=>{
   const due=decide(make(1100,998))
   assert.equal(due.decision,'MAINTENANCE_DUE')
   assert.equal(due.newIndexedGenerations,42)
-  const urgent=decide(make(1100,950))
+  const urgentInput=make(1100,950)
+  urgentInput.d4.active.throughLedgerHash=K
+  const urgent=decide(urgentInput)
   assert.equal(urgent.decision,'URGENT')
   assert.equal(urgent.indexedHeadroomGenerations,38)
 })
