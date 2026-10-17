@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalJson, sha256Hex } from '../current-state/canonical-json'
+import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import type {
   DbLessCurrentOverlayCheckpointManifestV2,
   DbLessCurrentOverlayEntryV1,
@@ -22,13 +22,24 @@ const entries = (): DbLessCurrentOverlayEntryV1[] =>
   })
 async function fixture() {
   const items=entries()
+  const shardBuckets=new Map<number,number>()
+  for (const e of items) {
+    const hash=await sha256Hex(utf8(e.canonicalKey))
+    const bucket=Number.parseInt(hash.slice(0,8),16)%8
+    shardBuckets.set(bucket,(shardBuckets.get(bucket)??0)+1)
+  }
+  const shards=await Promise.all([...shardBuckets].sort((a,b)=>a[0]-b[0]).map(async ([bucket, records])=>({
+    bucket, records, bytes: 1500,
+    key: `current-overlay-v1-100-bucket-${String(bucket).padStart(4,'0')}.json`,
+    artifactSha256: await sha256Hex(`SOURCE-${bucket}`),
+  })))
   const manifest: DbLessCurrentOverlayCheckpointManifestV2 = {
     schemaVersion: 2, network: 'devnet',
     epochId: 'epoch-v2', baseIdentity: 'base-v2',
     throughLedgerIndex: 100, throughLedgerHash: H,
     generationCount: 1, bucketCount: 8,
     entryCount: items.length, tombstoneCount: items.filter(x=>x.isTombstone).length,
-    shards: [],
+    shards,
     sourceGenerationProvenance:
       await buildDbLessCurrentOverlayGenerationProvenance({generationIds:['live-gen-100']}),
   }
@@ -62,6 +73,10 @@ describe('D5 v2 fully verified state to v3 stable immutable gzip import',()=>{
     await expect(prepareDbLessStableD4FromVerifiedV2({
       manifest:a.manifest,entries:changed,expectedStateSha256:a.sourceSha,
     })).rejects.toThrow(/source state SHA mismatch/)
+    await expect(prepareDbLessStableD4FromVerifiedV2({
+      manifest:{...a.manifest,shards:[]},
+      entries:a.items,expectedStateSha256:a.sourceSha,
+    })).rejects.toThrow(/referenced shard record count mismatch/)
     await expect(prepareDbLessStableD4FromVerifiedV2({
       manifest:{...a.manifest,entryCount:63},
       entries:a.items,expectedStateSha256:a.sourceSha,
