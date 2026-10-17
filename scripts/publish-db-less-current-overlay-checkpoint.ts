@@ -7,6 +7,7 @@ import {
 } from '../src/shared/db-less/current-overlay-channel'
 import { GitHubReleaseCurrentOverlayChannelStore } from '../src/shared/db-less/current-overlay-channel-github-release'
 import { assertDbLessD4ActivationTailSafety } from '../src/shared/db-less/current-overlay-activation-tail-guard'
+import { assertDbLessD4OwnerAutoOptIn } from '../src/shared/db-less/current-overlay-owner-opt-in'
 import {
   dbLessCurrentOverlayManifestProvenance,
   type DbLessCurrentOverlayCheckpointManifest,
@@ -309,6 +310,16 @@ async function main(): Promise<void> {
       active: pointer,
       updatedAt,
     })
+    // The unattended workflow checks owner opt-in before staging, but a
+    // 257-asset upload can overlap /d4-auto-disable. Recheck at the LAST
+    // possible point before CAS; fail closed if API is unavailable.
+    const unattendedOptIn = process.env.D4_UNATTENDED_OWNER_OPTIN_REQUIRED
+    if (unattendedOptIn !== undefined && unattendedOptIn !== 'true' && unattendedOptIn !== 'false') {
+      throw new Error('Invalid D4 unattended publication opt-in enforcement setting')
+    }
+    if (unattendedOptIn === 'true') {
+      await assertDbLessD4OwnerAutoOptIn({ repository, token })
+    }
     published = await channelStore.publish({
       channel,
       expectedPreviousChannelSha256: current?.channel.channelSha256 ?? null,
