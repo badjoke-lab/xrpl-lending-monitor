@@ -1,0 +1,120 @@
+name: D4 unattended Current coverage guard
+
+on:
+  schedule:
+    - cron: '9,39 * * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/db-less-d4-maintenance-policy.mjs'
+      - 'scripts/db-less-d4-maintenance-policy.test.mjs'
+      - 'scripts/db-less-d4-maintenance-check.mjs'
+      - '.github/workflows/db-less-d4-maintenance-guard.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d4-unattended-current-coverage-guard
+  cancel-in-progress: false
+
+jobs:
+  policy-test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test scripts/db-less-d4-maintenance-policy.test.mjs
+
+  observe:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Read current D3/D4 Release channels without modifying them
+        id: inspect
+        shell: bash
+        run: |
+          mkdir -p .local/d4-unattended-guard
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/db-less-live-channel-candidate-v1" \
+            --jq '.body' > .local/d4-unattended-guard/d3.json
+          d3_exit=$?
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/db-less-current-overlay-channel-v1" \
+            --jq '.body' > .local/d4-unattended-guard/d4.json
+          d4_exit=$?
+          if [ "$d3_exit" -ne 0 ] || [ "$d4_exit" -ne 0 ]; then
+            echo '{"schemaVersion":1,"status":"VERIFICATION_ERROR","channelMutation":false}' \
+              > .local/d4-unattended-guard/status.json
+          else
+            node scripts/db-less-d4-maintenance-check.mjs \
+              .local/d4-unattended-guard/d3.json \
+              .local/d4-unattended-guard/d4.json \
+              .local/d4-unattended-guard/status.json
+            checked=$?
+            if [ "$checked" -ne 0 ]; then
+              echo '{"schemaVersion":1,"status":"VERIFICATION_ERROR","channelMutation":false}' \
+                > .local/d4-unattended-guard/status.json
+            fi
+          fi
+          cat .local/d4-unattended-guard/status.json | tee "$GITHUB_STEP_SUMMARY"
+          echo "status=$(jq -er '.status' .local/d4-unattended-guard/status.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Notify only when guard state actually changes
+        shell: bash
+        env:
+          CURRENT_STATUS: ${{ steps.inspect.outputs.status }}
+        run: |
+          set -euo pipefail
+          # Important: this reports a fault, it does NOT authorize a D4
+          # promotion or mutate data Releases.
+          last="$(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/issues/1736/comments?per_page=100" \
+              --jq '.[] | .body | split("\n")[0] | select(startswith("[D4 UNATTENDED GUARD] "))' \
+              | tail -n 1 || true
+          )"
+          marker="[D4 UNATTENDED GUARD] $CURRENT_STATUS"
+          if [ "$last" = "$marker" ]; then
+            echo "State unchanged: no duplicate Issue notification."
+            exit 0
+          fi
+          summary="$(cat .local/d4-unattended-guard/status.json)"
+          gh issue comment 1736 --body "$(cat <<EOF
+          $marker
+
+          Automated D4 Current coverage inspection:
+          \`\`\`json
+          $summary
+          \`\`\`
+
+          IMPORTANT: This workflow is read-only. It neither repairs the
+          checkpoint nor authorizes a production release. Never treat a healthy
+          D3 freshness check as proof that D4 Current is covered.
+          EOF
+          )"
+
+      - name: Upload small status evidence without uploading channel secrets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d4-unattended-coverage-guard
+          path: .local/d4-unattended-guard/status.json
+          if-no-files-found: warn
+          retention-days: 7
