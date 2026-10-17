@@ -13,7 +13,7 @@ const PORTABLE_DIGEST = /^sha256:[a-f0-9]{64}$/
 
 export interface DbLessArtifact {
   key: string
-  mediaType: 'application/json'
+  mediaType: 'application/json' | 'application/gzip'
   bytes: Uint8Array
   sha256: string
   immutable: true

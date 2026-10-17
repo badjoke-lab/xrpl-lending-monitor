@@ -126,7 +126,7 @@ async function artifactFromFile(options: {
   }
   return {
     key: options.key,
-    mediaType: 'application/json',
+    mediaType: options.key.endsWith('.json.gz') ? 'application/gzip' : 'application/json',
     bytes,
     sha256,
     immutable: true,
