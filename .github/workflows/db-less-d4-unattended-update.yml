@@ -16,6 +16,8 @@ on:
       - 'scripts/db-less-d4-auto-decision.mjs'
       - 'scripts/db-less-d4-auto-decision.test.mjs'
       - 'scripts/db-less-d4-owner-optin-pages.test.mjs'
+      - 'scripts/db-less-d4-owner-approval.mjs'
+      - 'scripts/db-less-d4-owner-approval.test.mjs'
 
 permissions:
   contents: read
@@ -34,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: node --test scripts/db-less-d4-auto-decision.test.mjs scripts/db-less-d4-owner-optin-pages.test.mjs
+      - run: node --test scripts/db-less-d4-auto-decision.test.mjs scripts/db-less-d4-owner-optin-pages.test.mjs scripts/db-less-d4-owner-approval.test.mjs
 
   update-checkpoint:
     if: >-
@@ -72,13 +74,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .local/d4-auto
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/1736/comments?per_page=100" > .local/d4-auto/owner-comments.json
-          jq -r --arg owner "$GITHUB_REPOSITORY_OWNER" '
-            [.[][] | select(.user.login == $owner) |
-              (.body // "") | select(. == "/d4-auto-enable" or . == "/d4-auto-disable")] |
-              last // "/d4-auto-disable"
-          ' .local/d4-auto/owner-comments.json > .local/d4-auto/permission.json
-          approval="$(jq -er '.' .local/d4-auto/permission.json)"
+          node scripts/db-less-d4-owner-approval.mjs .local/d4-auto/permission.json
+          approval="$(jq -er '.command' .local/d4-auto/permission.json)"
           if [ "$approval" != '/d4-auto-enable' ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "D4 auto-update is disabled. No read/write of production assets."
@@ -170,12 +167,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/1736/comments?per_page=100" > .local/d4-auto/owner-comments-before-write.json
-          command="$(jq -r --arg owner "$GITHUB_REPOSITORY_OWNER" '
-            [.[][] | select(.user.login == $owner) |
-              (.body // "") | select(. == "/d4-auto-enable" or . == "/d4-auto-disable")] |
-              last // "/d4-auto-disable"
-          ' .local/d4-auto/owner-comments-before-write.json)"
+          node scripts/db-less-d4-owner-approval.mjs .local/d4-auto/permission-before-write.json
+          command="$(jq -er '.command' .local/d4-auto/permission-before-write.json)"
           test "$command" = "/d4-auto-enable"
           latest_d4="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D4_TAG" --jq '.body' | jq -er '.channelSha256')"
           test "$latest_d4" = "${{ steps.assess.outputs.expected_d4_sha }}"
