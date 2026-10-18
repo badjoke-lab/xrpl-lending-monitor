@@ -1,0 +1,59 @@
+name: D4 gzip compatibility and live full-shard qualification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/shared/db-less/current-overlay-checkpoint.ts'
+      - 'src/shared/db-less/current-overlay-reader.ts'
+      - 'src/shared/db-less/current-overlay-compressed-shard.ts'
+      - 'src/shared/db-less/current-overlay-compressed-shard.test.ts'
+      - 'src/shared/db-less/current-overlay-gzip-live-sample.test.ts'
+      - 'src/shared/db-less/current-overlay-gzip-full-live-audit.test.ts'
+      - 'scripts/build-db-less-current-overlay-checkpoint.ts'
+      - '.github/workflows/db-less-d4-gzip-admission.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-qualification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Compile backwards-compatible checkpoint builder
+        run: pnpm build:db-less-current-overlay-checkpoint
+      - name: Typecheck reader in worker and browser
+        run: |
+          pnpm exec tsc -p tsconfig.worker.json --noEmit
+          pnpm exec tsc -p tsconfig.app.json --noEmit
+      - name: Assert production workflows still default to JSON shards
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -Fq -- '--gzip-shards' .github/workflows/db-less-d4-unattended-update.yml
+          ! grep -Fq -- '--gzip-shards' .github/workflows/db-less-d4-current-overlay-activate.yml
+      - name: Test legacy JSON and strict gzip readback with state equivalence
+        run: >-
+          pnpm exec vitest run
+          src/shared/db-less/current-overlay-compressed-shard.test.ts
+          src/shared/db-less/current-overlay-checkpoint.test.ts
+          src/shared/db-less/current-overlay-reader.test.ts
+          src/shared/db-less/current-overlay-equivalence.test.ts
+      - name: Sample latest production checkpoint without publication
+        env:
+          RUN_D5_REAL_D4_GZIP_SAMPLE: 'true'
+        run: pnpm exec vitest run src/shared/db-less/current-overlay-gzip-live-sample.test.ts
+      - name: Audit exact gzip size and SHA of all 256 real production D4 shards
+        env:
+          RUN_D5_REAL_D4_FULL_AUDIT: 'true'
+        run: pnpm exec vitest run src/shared/db-less/current-overlay-gzip-full-live-audit.test.ts
