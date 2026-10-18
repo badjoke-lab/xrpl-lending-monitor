@@ -15,6 +15,7 @@ on:
       - '.github/workflows/db-less-d4-unattended-update.yml'
       - 'scripts/db-less-d4-auto-decision.mjs'
       - 'scripts/db-less-d4-auto-decision.test.mjs'
+      - 'scripts/db-less-d4-owner-optin-pages.test.mjs'
 
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: node --test scripts/db-less-d4-auto-decision.test.mjs
+      - run: node --test scripts/db-less-d4-auto-decision.test.mjs scripts/db-less-d4-owner-optin-pages.test.mjs
 
   update-checkpoint:
     if: >-
