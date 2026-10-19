@@ -1,0 +1,96 @@
+name: D3 independent freshness watchdog
+
+# Secondary fallback when a 5-minute driver/dispatch is orphan queued.
+# This does not replace the primary 5-minute bounded D3 collector.
+on:
+  schedule:
+    - cron: '4,19,34,49 * * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/db-less-d3-freshness-watchdog.yml'
+      - 'scripts/db-less-d3-freshness-watchdog.mjs'
+      - 'scripts/db-less-d3-freshness-watchdog.test.mjs'
+      - 'scripts/db-less-d3-dispatch-policy.mjs'
+      - 'scripts/db-less-d3-dispatch-policy.test.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-less-d3-independent-watchdog
+  cancel-in-progress: false
+
+jobs:
+  unit:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test scripts/db-less-d3-dispatch-policy.test.mjs scripts/db-less-d3-freshness-watchdog.test.mjs
+
+  recover-if-stale:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Independently read D3 Current freshness and one-shot gate
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d3-watchdog
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/db-less-live-channel-candidate-v1" > .local/d3-watchdog/release.json
+          jq -e '.draft == false and .prerelease == true' .local/d3-watchdog/release.json > /dev/null
+          jq -er '.body | fromjson' .local/d3-watchdog/release.json > .local/d3-watchdog/channel.json
+          gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow db-less-d3-live-once.yml --limit 30 \
+            --json status,createdAt > .local/d3-watchdog/runs.json
+          node scripts/db-less-d3-freshness-watchdog.mjs \
+            .local/d3-watchdog/channel.json \
+            .local/d3-watchdog/runs.json \
+            .local/d3-watchdog/decision.json
+          cat .local/d3-watchdog/decision.json >> "$GITHUB_STEP_SUMMARY"
+          echo "should_dispatch=$(jq -er '.shouldDispatch' .local/d3-watchdog/decision.json)" >> "$GITHUB_OUTPUT"
+      - name: Dispatch a bounded recovery collector only if stale and idle
+        if: steps.check.outputs.should_dispatch == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            if gh workflow run db-less-d3-live-once.yml \
+              --repo "$GITHUB_REPOSITORY" --ref main; then
+              echo "D3 watchdog dispatched a bounded live collector." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::D3 watchdog recovery dispatch failed 4 times"
+              exit 1
+            fi
+            sleep $((3 * attempt))
+          done
+      - name: Upload tiny read-only decision
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d3-independent-freshness-watchdog
+          path: .local/d3-watchdog/decision.json
+          if-no-files-found: ignore
+          retention-days: 7
