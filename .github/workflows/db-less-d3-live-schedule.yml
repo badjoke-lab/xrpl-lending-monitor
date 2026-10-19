@@ -40,6 +40,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+
       - name: Verify candidate channel is initialized
         shell: bash
         run: |
