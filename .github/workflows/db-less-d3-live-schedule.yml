@@ -40,6 +40,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+
       - name: Verify candidate channel is initialized
         shell: bash
         run: |
@@ -56,6 +61,26 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
         run: |
           set -euo pipefail
+          mkdir -p .local/d3-driver
+
+          # GitHub dispatch can return HTTP 500 even when the event was
+          # accepted. Retry boundedly; concurrency on the writer prevents
+          # overlapping mutation. Do not silently terminate a cadence.
+          dispatch_workflow() {
+            local target="$1"
+            shift
+            local attempt
+            for attempt in 1 2 3 4; do
+              if gh workflow run "$target" --repo "$GITHUB_REPOSITORY" --ref main "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -eq 4 ]; then
+                echo "::error::D3 workflow dispatch failed four times: $target"
+                return 1
+              fi
+              sleep $((3 * attempt))
+            done
+          }
 
           chain_mode=false
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
@@ -67,32 +92,42 @@ jobs:
           fi
 
           if [ "$chain_mode" != "true" ]; then
-            gh workflow run db-less-d3-live-once.yml --repo "$GITHUB_REPOSITORY" --ref main
+            dispatch_workflow db-less-d3-live-once.yml
             echo "Dispatched one diagnostic live collector run."
             exit 0
           fi
 
-          gh workflow run db-less-d3-live-schedule.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f continue_chain=true
+          dispatch_workflow db-less-d3-live-schedule.yml -f continue_chain=true
           echo "Prequeued successor five-minute driver run."
 
           for slot in 1 2 3 4 5 6; do
-            active="$(
-              gh run list \
-                --repo "$GITHUB_REPOSITORY" \
-                --workflow db-less-d3-live-once.yml \
-                --limit 20 \
-                --json status \
-                --jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length'
-            )"
+            # A GitHub 500 can leave a one-shot with zero jobs stuck
+            # 'queued' forever. Never let it suppress every later slot.
+            # A genuinely executing worker or a recent queued worker still
+            # blocks, protecting the single-writer invariant.
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow db-less-d3-live-once.yml \
+              --limit 30 \
+              --json status,createdAt \
+              > .local/d3-driver/live-runs.json
+            node scripts/db-less-d3-dispatch-policy.mjs \
+              .local/d3-driver/live-runs.json \
+              > .local/d3-driver/gate.json
+            active="$(jq -er '.blockers' .local/d3-driver/gate.json)"
+            orphaned="$(jq -er '.staleQueued' .local/d3-driver/gate.json)"
+            if [ "$orphaned" -gt 0 ]; then
+              echo "::warning::D3 has $orphaned orphan queued/pending dispatches. Re-dispatching without overriding a live writer."
+            fi
 
             if [ "$active" -eq 0 ]; then
-              gh workflow run db-less-d3-live-once.yml --repo "$GITHUB_REPOSITORY" --ref main
-              echo "Dispatched five-minute slot $slot."
+              if dispatch_workflow db-less-d3-live-once.yml; then
+                echo "Dispatched five-minute slot $slot."
+              else
+                echo "::warning::D3 dispatch failed in slot $slot; next bounded slot will retry."
+              fi
             else
-              echo "Skipped slot $slot because a live collector run is already active."
+              echo "Skipped slot $slot because $active collector dispatches are live or recently queued."
             fi
 
             if [ "$slot" -lt 6 ]; then
