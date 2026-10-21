@@ -10,6 +10,7 @@ import type {
   DbLessCurrentOverlayShardV1,
 } from './current-overlay-checkpoint'
 import { assertDbLessCurrentOverlayGenerationProvenance } from './current-overlay-provenance'
+import { decompressDbLessD4Shard } from './current-overlay-compressed-shard'
 
 const LEDGER_HASH = /^[A-F0-9]{64}$/
 const SHA256 = /^[a-f0-9]{64}$/
@@ -154,6 +155,15 @@ function assertManifest(manifest: DbLessCurrentOverlayCheckpointManifest): void 
     keys.add(shard.key)
     positiveInteger(shard.records, `shards[${index}].records`)
     positiveInteger(shard.bytes, `shards[${index}].bytes`)
+    if (shard.compression !== undefined) {
+      if (shard.compression !== 'gzip' || !shard.key.endsWith('.json.gz')) {
+        throw new Error('D4 compressed shard encoding/key mismatch')
+      }
+      const decodedSize = positiveInteger(shard.uncompressedBytes ?? 0, 'shard.uncompressedBytes')
+      if (decodedSize > 2_000_000) throw new Error('D4 uncompressed shard exceeds byte bound')
+    } else if (shard.uncompressedBytes !== undefined || shard.key.endsWith('.gz')) {
+      throw new Error('D4 shard compression metadata is inconsistent')
+    }
     if (!SHA256.test(shard.artifactSha256)) {
       throw new Error('D4 Current overlay shard SHA-256 is invalid')
     }
@@ -298,7 +308,13 @@ export class DbLessCurrentOverlayReader {
       throw new Error(`D4 Current overlay shard SHA-256 mismatch: ${descriptor.key}`)
     }
 
-    const decoded = JSON.parse(new TextDecoder().decode(bytes)) as ShardBodyV1
+    const text = descriptor.compression === 'gzip'
+      ? await decompressDbLessD4Shard(bytes, descriptor.uncompressedBytes!)
+      : new TextDecoder().decode(bytes)
+    if (descriptor.compression === 'gzip' && utf8(text).byteLength !== descriptor.uncompressedBytes) {
+      throw new Error('D4 decompressed shard byte count mismatch')
+    }
+    const decoded = JSON.parse(text) as ShardBodyV1
     if (
       decoded.schemaVersion !== 1
       || decoded.network !== 'devnet'
