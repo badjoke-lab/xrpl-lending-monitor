@@ -13,7 +13,8 @@ const PORTABLE_DIGEST = /^sha256:[a-f0-9]{64}$/
 
 export interface DbLessArtifact {
   key: string
-  mediaType: 'application/json'
+  // D3 manifests/chunks stay JSON. D4 opt-in compressed shards use gzip.
+  mediaType: 'application/json' | 'application/gzip'
   bytes: Uint8Array
   sha256: string
   immutable: true
