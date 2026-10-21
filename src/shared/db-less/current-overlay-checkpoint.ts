@@ -4,6 +4,7 @@ import type {
 } from '../portable-collector-payload'
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import type { DbLessArtifact } from './live-delta'
+import { compressDbLessD4Shard } from './current-overlay-compressed-shard'
 import {
   compareDbLessCurrentProjectionCanonicalKeys,
   parseDbLessCurrentProjectionCanonicalKey,
@@ -43,6 +44,9 @@ export interface DbLessCurrentOverlayShardV1 {
   records: number
   bytes: number
   artifactSha256: string
+  /** Optional isolated D5 compression extension; absent on existing D4 data. */
+  compression?: 'gzip'
+  uncompressedBytes?: number
 }
 
 interface DbLessCurrentOverlayCheckpointManifestCommonV1 {
@@ -190,6 +194,8 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
   bucketCount?: number
   maxRecordsPerShard?: number
   maxBytesPerShard?: number
+  /** Isolated opt-in; false for all production D4 callers. */
+  gzipShards?: boolean
 }): Promise<DbLessCurrentOverlayCheckpointV1> {
   const epochId = nonEmpty(options.epochId, 'epochId')
   const baseIdentity = nonEmpty(options.baseIdentity, 'baseIdentity')
@@ -322,15 +328,22 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
       bucketCount,
       records,
     }
-    const bytes = utf8(`${canonicalJson(body)}\n`)
-    if (bytes.byteLength > maxBytesPerShard) {
+    const jsonBytes = utf8(`${canonicalJson(body)}\n`)
+    if (jsonBytes.byteLength > maxBytesPerShard) {
       throw new Error(`D4 Current overlay bucket ${bucket} exceeds the byte guard`)
     }
-    const key = `current-overlay-v1-${throughLedgerIndex}-bucket-${String(bucket).padStart(4, '0')}.json`
+    const compressed = options.gzipShards === true
+    const bytes = compressed
+      ? await compressDbLessD4Shard(new TextDecoder().decode(jsonBytes))
+      : jsonBytes
+    if (bytes.byteLength > maxBytesPerShard) {
+      throw new Error(`D4 Current overlay compressed bucket ${bucket} exceeds the byte guard`)
+    }
+    const key = `current-overlay-v1-${throughLedgerIndex}-bucket-${String(bucket).padStart(4, '0')}.json${compressed ? '.gz' : ''}`
     const artifactSha256 = await sha256Hex(bytes)
     shardArtifacts.push({
       key,
-      mediaType: 'application/json',
+      mediaType: compressed ? 'application/gzip' : 'application/json',
       bytes,
       sha256: artifactSha256,
       immutable: true,
@@ -341,6 +354,7 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
       records: records.length,
       bytes: bytes.byteLength,
       artifactSha256,
+      ...(compressed ? { compression: 'gzip' as const, uncompressedBytes: jsonBytes.byteLength } : {}),
     })
   }
 

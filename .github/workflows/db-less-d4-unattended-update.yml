@@ -156,11 +156,23 @@ jobs:
           test "$(jq -er '.equivalence.sourceStateSha256' "$summary")" = "$(jq -er '.equivalence.checkpointStateSha256' "$summary")"
           test "$(jq -er '.traversedIncrementalManifests' "$summary")" = "$(jq -er '.incrementalGenerationCount' "$summary")"
           test "$(jq -er '.seedShardReads' "$summary")" = 256
+          manifest=".local/d4-auto/$(jq -er '.manifestKey' "$summary")"
+          # Print exact bounded-byte evidence BEFORE fail-closed quota check.
+          # Never weaken the limits to turn a resource failure into PASS.
+          jq -c '{
+            shardCount: (.shards | length),
+            largestShardBytes: ([.shards[].bytes] | max // 0),
+            totalShardBytes: ([.shards[].bytes] | add // 0),
+            totalBudgetBytes: 450000000,
+            perShardBudgetBytes: 2000000,
+            compressionModes: ([.shards[].compression // "json"] | unique)
+          }' "$manifest" | tee .local/d4-auto/asset-budget.json
+          cat .local/d4-auto/asset-budget.json >> "$GITHUB_STEP_SUMMARY"
           jq -e '
             .shards | length > 0 and length <= 256 and
             (map(.bytes) | all(. > 0 and . <= 2000000)) and
             (map(.bytes) | add <= 450000000)
-          ' ".local/d4-auto/$(jq -er '.manifestKey' "$summary")" > /dev/null
+          ' "$manifest" > /dev/null
 
       - name: Recheck owner opt-in and source before ANY immutable write
         if: steps.assess.outputs.should_build == 'true'
@@ -237,6 +249,7 @@ jobs:
           name: db-less-d4-unattended-maintenance
           path: |
             .local/d4-auto/decision.json
+            .local/d4-auto/asset-budget.json
             .local/d4-auto/rehearsal-summary.json
             .local/d4-auto/publication-summary.json
           if-no-files-found: ignore

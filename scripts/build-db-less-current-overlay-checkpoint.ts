@@ -157,6 +157,8 @@ async function main(): Promise<void> {
   const bucketCount = positiveInteger(args, '--bucket-count', 256)
   const maxRecordsPerShard = positiveInteger(args, '--max-records-per-shard', 50_000)
   const maxBytesPerShard = positiveInteger(args, '--max-bytes-per-shard', 2_000_000)
+  // Disabled by default: controlled producer opt-in requires reader compatibility.
+  const gzipShards = args.includes('--gzip-shards')
   const token = process.env.GH_TOKEN
   if (!token) throw new Error('GH_TOKEN is required')
 
@@ -245,6 +247,7 @@ async function main(): Promise<void> {
       bucketCount,
       maxRecordsPerShard,
       maxBytesPerShard,
+      gzipShards,
     })
     const localArtifacts = new Map(
       checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
@@ -303,6 +306,7 @@ async function main(): Promise<void> {
       bucketCount,
       maxRecordsPerShard,
       maxBytesPerShard,
+      gzipShards,
     })
     const localArtifacts = new Map(
       checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
@@ -346,6 +350,8 @@ async function main(): Promise<void> {
     manifestKey: checkpoint.manifestArtifact.key,
     manifestSha256: checkpoint.manifestArtifact.sha256,
     manifestSchemaVersion: checkpoint.manifest.schemaVersion,
+    gzipShards,
+    encodedShardBytes: checkpoint.shardArtifacts.reduce((sum, item) => sum + item.bytes.byteLength, 0),
     generationProvenance: checkpoint.manifest.schemaVersion === 2
       ? checkpoint.manifest.sourceGenerationProvenance
       : null,
