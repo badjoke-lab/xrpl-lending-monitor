@@ -106,7 +106,7 @@ jobs:
             --expected-channel-sha256 "${{ steps.freeze.outputs.d3_sha }}" \
             --active-overlay-channel-release-tag db-less-current-overlay-channel-v1 \
             --max-generations 2048 \
-            --bucket-count 256 \
+            --bucket-count 512 \
             --max-records-per-shard 50000 \
             --max-bytes-per-shard 2000000 \
             --gzip-shards \
@@ -129,10 +129,12 @@ jobs:
           test "$(jq -er '.traversedIncrementalManifests' "$summary")" = \
             "$(jq -er '.incrementalGenerationCount' "$summary")"
           test "$(jq -er '.seedShardReads' "$summary")" = 256
+          test "$(jq -er '.bucketCount' "$summary")" = 512
           manifest="$EVIDENCE_DIR/$(jq -er '.manifestKey' "$summary")"
           jq -e '
             (.schemaVersion == 2) and
-            ((.shards | length) > 0 and (.shards | length) <= 256) and
+            (.bucketCount == 512) and
+            ((.shards | length) > 0 and (.shards | length) <= 512) and
             (.shards | all(.[];
               .compression == "gzip" and
               (.key | endswith(".json.gz")) and
