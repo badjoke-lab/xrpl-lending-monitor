@@ -219,7 +219,8 @@ export async function verifyDbLessCurrentOverlayIncrementalEquivalence(options: 
   if (
     options.seedManifest.epochId !== options.reader.manifest.epochId
     || options.seedManifest.baseIdentity !== options.reader.manifest.baseIdentity
-    || options.seedManifest.bucketCount !== options.reader.manifest.bucketCount
+    // Only growth is supported; compare canonical state and provenance exactly.
+    || options.seedManifest.bucketCount > options.reader.manifest.bucketCount
     || options.seedManifest.throughLedgerIndex >= options.reader.manifest.throughLedgerIndex
   ) {
     throw new Error('D4 incremental equivalence seed identity is incompatible')
