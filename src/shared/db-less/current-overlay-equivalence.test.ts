@@ -146,6 +146,71 @@ describe('D4 Current overlay compaction equivalence', () => {
     expect(result.sourceStateSha256).toBe(result.checkpointStateSha256)
   })
 
+
+  it('repartitions legacy 8-bucket seed into 16 bounded gzip shards with exact state', async () => {
+    const source = generations()
+    const seed = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 101,
+      throughLedgerHash: HASH_A,
+      bucketCount: 8,
+      generations: [source[0]!],
+    })
+    const seedArtifacts = new Map(seed.shardArtifacts.map(a => [a.key, a.bytes] as const))
+    const seedReader = new DbLessCurrentOverlayReader({
+      manifest: seed.manifest,
+      readArtifact: async key => seedArtifacts.get(key) ?? null,
+    })
+    const seedEntries = (await seedReader.readAll()).items
+    const checkpoint = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 102,
+      throughLedgerHash: HASH_B,
+      bucketCount: 16,
+      gzipShards: true,
+      generations: [source[1]!],
+      seed: { manifest: seed.manifest, entries: seedEntries },
+    })
+    const artifacts = new Map(checkpoint.shardArtifacts.map(a => [a.key, a.bytes] as const))
+    const reader = new DbLessCurrentOverlayReader({
+      manifest: checkpoint.manifest,
+      readArtifact: async key => artifacts.get(key) ?? null,
+    })
+    const result = await verifyDbLessCurrentOverlayIncrementalEquivalence({
+      seedManifest: seed.manifest,
+      seedEntries,
+      generations: [source[1]!],
+      reader,
+    })
+    expect(checkpoint.manifest.bucketCount).toBe(16)
+    expect(checkpoint.manifest.shards.every(s => s.compression === 'gzip')).toBe(true)
+    expect(result.equivalent).toBe(true)
+    expect(result.sourceStateSha256).toBe(result.checkpointStateSha256)
+    expect((await reader.get('vault', 'A')).item?.value).toEqual({ id: 'A', version: 2 })
+    expect((await reader.get('loan', 'B')).item?.isTombstone).toBe(true)
+
+    await expect(buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 102,
+      throughLedgerHash: HASH_B,
+      bucketCount: 4,
+      generations: [source[1]!],
+      seed: { manifest: seed.manifest, entries: seedEntries },
+    })).rejects.toThrow('seed checkpoint identity is incompatible')
+
+    await expect(buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 101,
+      throughLedgerHash: HASH_A,
+      bucketCount: 513,
+      generations: [source[0]!],
+    })).rejects.toThrow('bounded Release asset budget')
+  })
+
   it('fails when a valid checkpoint encodes a different folded state', async () => {
     const source = generations(2)
     const different = generations(3)
