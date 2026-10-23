@@ -47,3 +47,124 @@ jobs:
           path: .local/d4-current-overlay-incremental
           if-no-files-found: error
           retention-days: 14
+
+  # This separate owner-only command proves actual gzip bytes against live
+  # immutable D3/D4 channels. It never publishes a Release or changes Current.
+  # Keep the existing non-gzip rehearsal command unchanged.
+  rehearse-gzip:
+    if: >-
+      github.event.issue.number == 1736 &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.body == '/d4-rehearse-current-overlay-gzip'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EVIDENCE_DIR: .local/d4-gzip-live-proof
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+
+      - name: Freeze live read-only D3 and D4 identities
+        id: freeze
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/db-less-live-channel-candidate-v1" \
+            --jq '.body' > "$EVIDENCE_DIR/frozen-d3.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/db-less-current-overlay-channel-v1" \
+            --jq '.body' > "$EVIDENCE_DIR/frozen-d4.json"
+          jq -e '.network == "devnet" and .schemaVersion == 1' "$EVIDENCE_DIR/frozen-d3.json" >/dev/null
+          jq -e '.network == "devnet" and .schemaVersion == 1' "$EVIDENCE_DIR/frozen-d4.json" >/dev/null
+          jq -en --slurpfile d3 "$EVIDENCE_DIR/frozen-d3.json" \
+            --slurpfile d4 "$EVIDENCE_DIR/frozen-d4.json" \
+            '$d3[0].base.generationId == $d4[0].active.baseIdentity and $d3[0].epochId == $d4[0].epochId' >/dev/null
+          echo "d3_sha=$(jq -er '.channelSha256' "$EVIDENCE_DIR/frozen-d3.json")" >> "$GITHUB_OUTPUT"
+          echo "d4_sha=$(jq -er '.channelSha256' "$EVIDENCE_DIR/frozen-d4.json")" >> "$GITHUB_OUTPUT"
+          echo "d3_head=$(jq -er '.lastCommittedLedgerIndex' "$EVIDENCE_DIR/frozen-d3.json")" >> "$GITHUB_OUTPUT"
+          echo "d4_head=$(jq -er '.active.throughLedgerIndex' "$EVIDENCE_DIR/frozen-d4.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Build D4 Current overlay checkpoint CLI with gzip reader
+        run: pnpm build:db-less-current-overlay-checkpoint
+
+      - name: Build verified gzip incremental Current overlay checkpoint locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-current-overlay-checkpoint-build/build-db-less-current-overlay-checkpoint.mjs \
+            --local \
+            --repository "$GITHUB_REPOSITORY" \
+            --channel-release-tag db-less-live-channel-candidate-v1 \
+            --expected-channel-sha256 "${{ steps.freeze.outputs.d3_sha }}" \
+            --active-overlay-channel-release-tag db-less-current-overlay-channel-v1 \
+            --max-generations 2048 \
+            --bucket-count 256 \
+            --max-records-per-shard 50000 \
+            --max-bytes-per-shard 2000000 \
+            --gzip-shards \
+            --output-dir "$EVIDENCE_DIR"
+
+      - name: Verify exact source parity and actual gzip publication budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary="$EVIDENCE_DIR/rehearsal-summary.json"
+          test "$(jq -er '.mode' "$summary")" = incremental
+          test "$(jq -er '.gzipShards' "$summary")" = true
+          test "$(jq -er '.channelSha256' "$summary")" = "${{ steps.freeze.outputs.d3_sha }}"
+          test "$(jq -er '.throughLedgerIndex' "$summary")" = "${{ steps.freeze.outputs.d3_head }}"
+          test "$(jq -er '.seedThroughLedgerIndex' "$summary")" = "${{ steps.freeze.outputs.d4_head }}"
+          test "$(jq -er '.manifestSchemaVersion' "$summary")" = 2
+          test "$(jq -er '.equivalence.equivalent' "$summary")" = true
+          test "$(jq -er '.equivalence.sourceStateSha256' "$summary")" = \
+            "$(jq -er '.equivalence.checkpointStateSha256' "$summary")"
+          test "$(jq -er '.traversedIncrementalManifests' "$summary")" = \
+            "$(jq -er '.incrementalGenerationCount' "$summary")"
+          test "$(jq -er '.seedShardReads' "$summary")" = 256
+          manifest="$EVIDENCE_DIR/$(jq -er '.manifestKey' "$summary")"
+          jq -e '
+            (.schemaVersion == 2) and
+            ((.shards | length) > 0 and (.shards | length) <= 256) and
+            (.shards | all(.[];
+              .compression == "gzip" and
+              (.key | endswith(".json.gz")) and
+              (.bytes > 0 and .bytes <= 2000000) and
+              (.uncompressedBytes > 0 and .uncompressedBytes <= 2000000)
+            )) and
+            (([.shards[].bytes] | add) <= 450000000)
+          ' "$manifest" >/dev/null
+          total="$(jq -er '[.shards[].bytes] | add' "$manifest")"
+          test "$(jq -er '.encodedShardBytes' "$summary")" = "$total"
+          latest_d4_sha="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/db-less-current-overlay-channel-v1" --jq '.body' | jq -er '.channelSha256')"
+          test "$latest_d4_sha" = "${{ steps.freeze.outputs.d4_sha }}"
+          jq -c '{
+            schemaVersion: 1,
+            shardCount: (.shards | length),
+            totalShardBytes: ([.shards[].bytes] | add),
+            largestShardBytes: ([.shards[].bytes] | max),
+            largestUncompressedBytes: ([.shards[].uncompressedBytes] | max),
+            byteLimit: 450000000,
+            compressionModes: ([.shards[].compression] | unique),
+            productionMutation: false
+          }' "$manifest" | tee "$EVIDENCE_DIR/gzip-budget.json"
+          cat "$EVIDENCE_DIR/gzip-budget.json" >> "$GITHUB_STEP_SUMMARY"
+          echo "LIVE D4 GZIP REHEARSAL PASS — zero writes to immutable Releases or channel." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain only small proof metadata, never shard payloads
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d4-gzip-live-readonly-proof
+          path: |
+            .local/d4-gzip-live-proof/rehearsal-summary.json
+            .local/d4-gzip-live-proof/gzip-budget.json
+          if-no-files-found: ignore
+          retention-days: 7
