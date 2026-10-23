@@ -205,6 +205,8 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
     options.bucketCount ?? options.seed?.manifest.bucketCount ?? 256,
     'bucketCount',
   )
+  // Up to 512 data shards plus the manifest stays below the Release asset cap.
+  if (bucketCount > 512) throw new Error('D4 bucket count exceeds bounded Release asset budget')
   const maxRecordsPerShard = positiveInteger(
     options.maxRecordsPerShard ?? 50_000,
     'maxRecordsPerShard',
@@ -225,7 +227,8 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
     if (
       seed.manifest.epochId !== epochId
       || seed.manifest.baseIdentity !== baseIdentity
-      || seed.manifest.bucketCount !== bucketCount
+      // Existing seed entries are rehashed into the new, larger bucket space.
+      || seed.manifest.bucketCount > bucketCount
       || seed.manifest.throughLedgerIndex >= throughLedgerIndex
     ) {
       throw new Error('D4 Current overlay seed checkpoint identity is incompatible')
