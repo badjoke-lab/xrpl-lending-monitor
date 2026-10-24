@@ -9,6 +9,7 @@ import type {
   DbLessCurrentOverlayCheckpointManifest,
   DbLessCurrentOverlayGenerationV1,
 } from './current-overlay-checkpoint'
+import { readDbLessCurrentOnlyTailV1 } from './current-only-tail-reader'
 import { readDbLessCurrentOverlayGeneration } from './current-overlay-generation-reader'
 import {
   readDbLessCurrentOverlaySourceAfterCheckpoint,
@@ -330,6 +331,63 @@ export async function readPublicIndexedCurrentTailAfterCheckpoint(options: {
       indexedGenerationPointers: selected.length,
       fromLedgerIndex: options.checkpoint.throughLedgerIndex,
       toLedgerIndex: channel.lastCommittedLedgerIndex,
+    },
+  }
+}
+
+/**
+ * Isolated D5 candidate only. The public Vault page must not switch to this
+ * reader before every post-checkpoint mutation generation has an immutable
+ * Current-only asset and D4 is inside retained tail coverage.
+ */
+export interface PublicCurrentOnlyTailResultV1 {
+  channel: DbLessChannelV1
+  source: {
+    generations: DbLessCurrentOverlayGenerationV1[]
+    indexedGenerationPointers: number
+    assetReads: number
+    transferredBytes: number
+    fromLedgerIndex: number
+    toLedgerIndex: number
+  }
+}
+
+export async function readPublicCurrentOnlyTailAfterCheckpoint(options: {
+  repository: string
+  channelReleaseTag: string
+  checkpoint: Pick<
+    DbLessCurrentOverlayCheckpointManifest,
+    'epochId' | 'baseIdentity' | 'throughLedgerIndex' | 'throughLedgerHash'
+  >
+  fetcher?: typeof fetch
+  maxArtifactBytes?: number
+  maxMutationGenerations?: number
+  maxTotalBytes?: number
+  relayOrigin?: string
+}): Promise<PublicCurrentOnlyTailResultV1> {
+  const channel = await openPublicGithubDbLessChannel({
+    repository: options.repository,
+    releaseTag: options.channelReleaseTag,
+    fetcher: options.fetcher,
+  })
+  const readArtifact = createPublicGithubLocatedArtifactReader({
+    repository: options.repository,
+    fetcher: options.fetcher,
+    maxArtifactBytes: options.maxArtifactBytes,
+    relayOrigin: options.relayOrigin,
+  })
+  const result = await readDbLessCurrentOnlyTailV1({
+    channel,
+    checkpoint: options.checkpoint,
+    readArtifact,
+    maxGenerations: options.maxMutationGenerations,
+    maxTotalBytes: options.maxTotalBytes,
+  })
+  return {
+    channel,
+    source: {
+      ...result,
+      indexedGenerationPointers: result.assetReads,
     },
   }
 }

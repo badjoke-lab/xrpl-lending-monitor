@@ -47,6 +47,24 @@ describe('D5 public Release HTTPS relay mapping: candidate only', () => {
     }))
   })
 
+  it('allows exact D3 Current-only gzip asset and rejects other extensions and Release classes', () => {
+    const currentOnly = D3.replace('-chunk-0000.json', '-current-only-v1.json.gz')
+    const url = mappedDbLessD5ReleaseAsset({ source: currentOnly, relayOrigin: ORIGIN })
+    expect(url).toBe(
+      currentOnly.replace(
+        'https://github.com/badjoke-lab/xrpl-lending-monitor/releases/download/',
+        ORIGIN + '/artifacts/',
+      ),
+    )
+    for (const invalid of [
+      currentOnly.replace('.json.gz', '.json'),
+      currentOnly.replace('-current-only-v1', '-current-only-v2'),
+      currentOnly.replace('db-less-live-data-v1-', 'db-less-current-overlay-v1-'),
+    ]) {
+      expect(() => mappedDbLessD5ReleaseAsset({ source: invalid, relayOrigin: ORIGIN })).toThrow()
+    }
+  })
+
   it('refuses HTTP, path/userinfo/query relay configuration and arbitrary asset URL substitution', () => {
     for (const origin of [
       'http://xrpl-relay.example.test',
