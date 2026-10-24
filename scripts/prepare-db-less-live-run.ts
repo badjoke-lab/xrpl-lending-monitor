@@ -39,6 +39,7 @@ type Arguments = {
   maxLedgers: number
   chunkMaxRecords: number
   readWindowSize: number
+  enableCurrentOnlyArtifact: boolean
 }
 
 function argumentValue(args: readonly string[], name: string): string | null {
@@ -110,6 +111,8 @@ function parseArguments(args: readonly string[]): Arguments {
       NORMALIZED_PAYLOAD_CHUNK_MAX_RECORDS,
     ),
     readWindowSize: positiveInteger(args, '--read-window-size', 16),
+    // Deliberate opt-in for isolated producer qualification only. Production D3 remains unchanged.
+    enableCurrentOnlyArtifact: args.includes('--enable-current-only-artifact'),
   }
 }
 
@@ -158,6 +161,7 @@ async function main(): Promise<void> {
       maxRecords: args.chunkMaxRecords,
       maxEncodedBytes: NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES,
     },
+    enableCurrentOnlyArtifact: args.enableCurrentOnlyArtifact,
   })
 
   await rm(args.outputDir, { recursive: true, force: true })
@@ -179,6 +183,8 @@ async function main(): Promise<void> {
       committedLedgerHash: channel.lastCommittedLedgerHash,
       scannedLedgers: 0,
       chunkMaxRecords: args.chunkMaxRecords,
+      currentOnlyArtifactEnabled: args.enableCurrentOnlyArtifact,
+      currentOnlyArtifactPrepared: false,
       immutableArtifacts: 0,
     }
     await writeJson(join(args.outputDir, 'run-summary.json'), summary)
@@ -278,6 +284,10 @@ async function main(): Promise<void> {
     endLedgerHash: publication.delta.manifest.endLedgerHash,
     scannedLedgers: publication.delta.manifest.ledgerCount,
     chunkMaxRecords: args.chunkMaxRecords,
+    currentOnlyArtifactEnabled: args.enableCurrentOnlyArtifact,
+    currentOnlyArtifactPrepared: prepared.currentOnlyAsset !== null,
+    currentOnlyArtifactBytes: prepared.currentOnlyAsset?.artifact.bytes.byteLength ?? 0,
+    currentOnlyArtifactSha256: prepared.currentOnlyAsset?.artifact.sha256 ?? null,
     completeToLatest: scan.completeToLatest,
     semanticCounts: publication.delta.manifest.semanticCounts,
     deltaGenerationId: publication.delta.manifest.generationId,
