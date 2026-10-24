@@ -46,7 +46,8 @@ jobs:
         github.event_name == 'issue_comment' &&
         github.event.issue.number == 1736 &&
         github.event.comment.user.login == github.repository_owner &&
-        github.event.comment.body == '/d4-auto-enable'
+        (github.event.comment.body == '/d4-auto-enable' ||
+         github.event.comment.body == '/d4-auto-refresh')
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -120,7 +121,7 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile
 
-      - name: Build existing production-proven v2 D4 publisher and checkpoint CLIs
+      - name: Build guarded gzip-capable v2 D4 publisher and checkpoint CLIs
         if: steps.assess.outputs.should_build == 'true'
         run: |
           pnpm build:db-less-current-overlay-checkpoint
@@ -136,9 +137,10 @@ jobs:
           --expected-channel-sha256 "${{ steps.assess.outputs.expected_d3_sha }}"
           --active-overlay-channel-release-tag "$D4_TAG"
           --max-generations 2048
-          --bucket-count 256
+          --bucket-count 512
           --max-records-per-shard 50000
           --max-bytes-per-shard 2000000
+          --gzip-shards
           --output-dir .local/d4-auto
 
       - name: Verify source, bounded bytes, exact state and frozen D4 seed
@@ -152,10 +154,14 @@ jobs:
           test "$(jq -er '.throughLedgerIndex' "$summary")" = "${{ steps.assess.outputs.d3_head }}"
           test "$(jq -er '.seedThroughLedgerIndex' "$summary")" = "${{ steps.assess.outputs.d4_head }}"
           test "$(jq -er '.manifestSchemaVersion' "$summary")" = 2
+          test "$(jq -er '.gzipShards' "$summary")" = true
+          test "$(jq -er '.bucketCount' "$summary")" = 512
           test "$(jq -er '.equivalence.equivalent' "$summary")" = true
           test "$(jq -er '.equivalence.sourceStateSha256' "$summary")" = "$(jq -er '.equivalence.checkpointStateSha256' "$summary")"
           test "$(jq -er '.traversedIncrementalManifests' "$summary")" = "$(jq -er '.incrementalGenerationCount' "$summary")"
-          test "$(jq -er '.seedShardReads' "$summary")" = 256
+          # The first rollover reads 256 existing shards; subsequent runs read 512.
+          test "$(jq -er '.seedShardReads' "$summary")" = \
+            "$(jq -er '.active.bucketCount' .local/d4-auto/d4.json)"
           manifest=".local/d4-auto/$(jq -er '.manifestKey' "$summary")"
           # Print exact bounded-byte evidence BEFORE fail-closed quota check.
           # Never weaken the limits to turn a resource failure into PASS.
@@ -165,14 +171,24 @@ jobs:
             totalShardBytes: ([.shards[].bytes] | add // 0),
             totalBudgetBytes: 450000000,
             perShardBudgetBytes: 2000000,
+            maxUncompressedShardBytes: ([.shards[].uncompressedBytes] | max // 0),
             compressionModes: ([.shards[].compression // "json"] | unique)
           }' "$manifest" | tee .local/d4-auto/asset-budget.json
           cat .local/d4-auto/asset-budget.json >> "$GITHUB_STEP_SUMMARY"
           jq -e '
-            .shards | length > 0 and length <= 256 and
-            (map(.bytes) | all(. > 0 and . <= 2000000)) and
-            (map(.bytes) | add <= 450000000)
+            (.schemaVersion == 2) and
+            (.bucketCount == 512) and
+            ((.shards | length) > 0 and (.shards | length) <= 512) and
+            (.shards | all(.[];
+              .compression == "gzip" and
+              (.key | endswith(".json.gz")) and
+              (.bytes > 0 and .bytes <= 2000000) and
+              (.uncompressedBytes > 0 and .uncompressedBytes <= 2000000)
+            )) and
+            (([.shards[].bytes] | add) <= 450000000)
           ' "$manifest" > /dev/null
+          test "$(jq -er '.encodedShardBytes' "$summary")" = \
+            "$(jq -er '[.shards[].bytes] | add' "$manifest")"
 
       - name: Recheck owner opt-in and source before ANY immutable write
         if: steps.assess.outputs.should_build == 'true'
@@ -236,6 +252,7 @@ jobs:
           current="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D4_TAG" --jq '.body')"
           test "$(jq -er '.channelSha256' <<< "$current")" = "$published_sha"
           test "$(jq -er '.active.throughLedgerIndex' <<< "$current")" = "$published_ledger"
+          test "$(jq -er '.active.bucketCount' <<< "$current")" = 512
           latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D3_TAG" --jq '.body')"
           jq -e --argjson through "$published_ledger" '
             .currentProjectionTail.coverageStartLedgerIndex <= $through
