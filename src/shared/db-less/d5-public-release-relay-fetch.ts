@@ -11,7 +11,7 @@ const REPO = 'badjoke-lab/xrpl-lending-monitor'
 const SOURCE_PREFIX = `https://github.com/${REPO}/releases/download/`
 
 const TAG = /^(?:d2-current-base-\d+|db-less-current-overlay-v1-\d+|db-less-live-data-v1-\d{8}-\d{2}(?:-r\d+)?)$/
-const FILE = /^(?:base-manifest\.json|(?:vault|loan|loan-broker)-page-\d{6}\.json\.gz|lookup-[0-9A-F]+\.json\.gz|current-overlay-v1-\d+-(?:manifest\.json|bucket-\d{4}\.json(?:\.gz)?)|live-v1-\d+-\d+-[a-f0-9]{16}-[a-f0-9]{12}-(?:manifest|chunk-\d{4})\.json)$/
+const FILE = /^(?:base-manifest\.json|(?:vault|loan|loan-broker)-page-\d{6}\.json\.gz|lookup-[0-9A-F]+\.json\.gz|current-overlay-v1-\d+-(?:manifest\.json|bucket-\d{4}\.json(?:\.gz)?)|live-v1-\d+-\d+-[a-f0-9]{16}-[a-f0-9]{12}-(?:(?:manifest|chunk-\d{4})\.json|current-only-v1\.json\.gz))$/
 const HEX_LEDGER = /^db-less-current-overlay-v1-(\d+)$/
 const SHARD_LEDGER = /^current-overlay-v1-(\d+)-/
 
