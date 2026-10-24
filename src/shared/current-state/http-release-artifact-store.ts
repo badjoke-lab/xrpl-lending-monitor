@@ -67,11 +67,23 @@ function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
-export function assertAllowedReleaseResponseOrigin(value: string): void {
+export function assertAllowedReleaseResponseOrigin(value: string, relayOrigin?: string): void {
   const url = new URL(value)
-  if (url.protocol !== 'https:' || !ALLOWED_RELEASE_RESPONSE_HOSTS.has(url.hostname)) {
+  if (url.protocol !== 'https:') {
     throw new Error('Release asset response origin is not allowed')
   }
+  if (ALLOWED_RELEASE_RESPONSE_HOSTS.has(url.hostname)) return
+  if (relayOrigin) {
+    // Only exact same-origin immutable relay paths, never a generic allowed
+    // hostname, credentialed origin or a redirect to some other route.
+    const trusted = new URL(relayOrigin)
+    if (trusted.protocol === 'https:' && trusted.pathname === '/'
+      && !trusted.username && !trusted.password && !trusted.search && !trusted.hash
+      && url.origin === trusted.origin
+      && /^\/artifacts\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(url.pathname)
+      && !url.search && !url.hash) return
+  }
+  throw new Error('Release asset response origin is not allowed')
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, controller: AbortController): Promise<T> {

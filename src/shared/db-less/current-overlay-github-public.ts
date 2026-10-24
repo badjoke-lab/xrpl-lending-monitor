@@ -43,9 +43,10 @@ async function boundedBytes(
   response: Response,
   maxBytes: number,
   field: string,
+  relayOrigin?: string,
 ): Promise<Uint8Array> {
   if (!response.ok) throw new Error(`${field} fetch failed with ${response.status}`)
-  assertAllowedReleaseResponseOrigin(response.url)
+  assertAllowedReleaseResponseOrigin(response.url, relayOrigin)
   const length = response.headers.get('content-length')
   if (length !== null && Number(length) > maxBytes) {
     throw new Error(`${field} exceeds byte limit`)
@@ -103,6 +104,7 @@ export async function openPublicGithubCurrentOverlay(options: {
   fetcher?: typeof fetch
   maxManifestBytes?: number
   maxShardBytes?: number
+  relayOrigin?: string
 }): Promise<PublicCurrentOverlayOpenResult> {
   const fetcher = options.fetcher ?? ((input, init) => fetch(input, init))
   const releaseResponse = await fetcher(
@@ -140,6 +142,7 @@ export async function openPublicGithubCurrentOverlay(options: {
     manifestResponse,
     options.maxManifestBytes ?? DEFAULT_MAX_MANIFEST_BYTES,
     'D4 checkpoint manifest',
+    options.relayOrigin,
   )
   if (await sha256Hex(manifestBytes) !== channel.active.manifestSha256) {
     throw new Error('D4 checkpoint manifest digest mismatch')
@@ -157,7 +160,7 @@ export async function openPublicGithubCurrentOverlay(options: {
       const descriptor = descriptors.get(key)
       if (!descriptor) return null
       const response = await fetcher(resolver.urlFor(key), { redirect: 'follow' })
-      const bytes = await boundedBytes(response, maxShardBytes, `D4 shard ${key}`)
+      const bytes = await boundedBytes(response, maxShardBytes, `D4 shard ${key}`, options.relayOrigin)
       if (bytes.byteLength !== descriptor.bytes) {
         throw new Error(`D4 shard size mismatch: ${key}`)
       }
