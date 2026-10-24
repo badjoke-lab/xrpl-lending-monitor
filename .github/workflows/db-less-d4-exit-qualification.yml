@@ -53,6 +53,7 @@ jobs:
           manifest_sha="$(jq -er '.active.manifestSha256' <<<"$d4_body")"
           active_through="$(jq -er '.active.throughLedgerIndex' <<<"$d4_body")"
           active_generations="$(jq -er '.active.generationCount' <<<"$d4_body")"
+          active_bucket_count="$(jq -er '.active.bucketCount' <<<"$d4_body")"
           active_base="$(jq -er '.active.baseIdentity' <<<"$d4_body")"
           source_channel_sha="$(jq -er '.active.sourceChannelSha256' <<<"$d4_body")"
 
@@ -60,6 +61,8 @@ jobs:
           [[ "$source_channel_sha" =~ ^[a-f0-9]{64}$ ]]
           test "$active_through" -gt 0
           test "$active_generations" -gt 0
+          test "$active_bucket_count" -ge 1
+          test "$active_bucket_count" -le 512
 
           checkpoint_release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$active_tag")"
           test "$(jq -r '.draft' <<<"$checkpoint_release")" = "false"
@@ -76,12 +79,29 @@ jobs:
           test "$(jq -r '.throughLedgerIndex' "$manifest")" = "$active_through"
           test "$(jq -r '.generationCount' "$manifest")" = "$active_generations"
           test "$(jq -r '.baseIdentity' "$manifest")" = "$active_base"
-          test "$(jq -r '.bucketCount' "$manifest")" = "256"
+          test "$(jq -r '.bucketCount' "$manifest")" = "$active_bucket_count"
           test "$(jq -r '.sourceGenerationProvenance.scheme' "$manifest")" = "rolling-sha256-v1"
           test "$(jq -r '.sourceGenerationProvenance.generationCount' "$manifest")" = "$active_generations"
           test "$(jq -r 'has("sourceGenerationIds")' "$manifest")" = "false"
-          test "$(jq -r '[.shards[].bytes] | max <= 2000000' "$manifest")" = "true"
-          test "$(jq -r '.shards | length > 0 and length <= 256' "$manifest")" = "true"
+          # Existing 256-bucket JSON and newly published 512-bucket gzip
+          # checkpoints have different encodings but identical trust bounds.
+          # Never silently exempt gzip decoded bytes from the 2MB bound.
+          jq -e --argjson buckets "$active_bucket_count" '
+            (.shards | length > 0 and length <= $buckets) and
+            (.shards | all(.[];
+              (.bytes > 0 and .bytes <= 2000000) and
+              (if $buckets == 512 then
+                .compression == "gzip" and
+                (.key | endswith(".json.gz")) and
+                (.uncompressedBytes > 0 and .uncompressedBytes <= 2000000)
+              else
+                (.compression == null) and
+                (.uncompressedBytes == null) and
+                (.key | endswith(".json"))
+              end)
+            )) and
+            (([.shards[].bytes] | add) <= 450000000)
+          ' "$manifest" >/dev/null
 
           d3_release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D3_CHANNEL_RELEASE_TAG")"
           test "$(jq -r '.draft' <<<"$d3_release")" = "false"
@@ -95,8 +115,11 @@ jobs:
           lag="$((d3_head - active_through))"
           manifest_bytes="$(wc -c < "$manifest" | tr -d ' ')"
           provenance_digest="$(jq -er '.sourceGenerationProvenance.digestSha256' "$manifest")"
+          total_encoded_bytes="$(jq -er '[.shards[].bytes] | add' "$manifest")"
+          shard_count="$(jq -er '.shards | length' "$manifest")"
+          compression_mode="$(if [ "$active_bucket_count" = 512 ]; then echo gzip; else echo json; fi)"
 
-          jq -n             --arg mainSha "$(git rev-parse HEAD)"             --arg activeCheckpointTag "$active_tag"             --arg activeManifestKey "$manifest_key"             --arg activeManifestSha256 "$manifest_sha"             --arg sourceChannelSha256 "$source_channel_sha"             --arg generationProvenanceDigestSha256 "$provenance_digest"             --argjson activeThroughLedgerIndex "$active_through"             --argjson currentD3Head "$d3_head"             --argjson currentLagLedgers "$lag"             --argjson generationCount "$active_generations"             --argjson manifestBytes "$manifest_bytes"             '{
+          jq -n             --arg mainSha "$(git rev-parse HEAD)"             --arg activeCheckpointTag "$active_tag"             --arg activeManifestKey "$manifest_key"             --arg activeManifestSha256 "$manifest_sha"             --arg sourceChannelSha256 "$source_channel_sha"             --arg generationProvenanceDigestSha256 "$provenance_digest"             --arg compressionMode "$compression_mode"             --argjson bucketCount "$active_bucket_count"             --argjson shardCount "$shard_count"             --argjson totalEncodedShardBytes "$total_encoded_bytes"             --argjson activeThroughLedgerIndex "$active_through"             --argjson currentD3Head "$d3_head"             --argjson currentLagLedgers "$lag"             --argjson generationCount "$active_generations"             --argjson manifestBytes "$manifest_bytes"             '{
               schemaVersion: 1,
               mainSha: $mainSha,
               activeCheckpointTag: $activeCheckpointTag,
@@ -106,6 +129,11 @@ jobs:
               currentD3Head: $currentD3Head,
               currentLagLedgers: $currentLagLedgers,
               generationCount: $generationCount,
+              bucketCount: $bucketCount,
+              shardCount: $shardCount,
+              compressionMode: $compressionMode,
+              totalEncodedShardBytes: $totalEncodedShardBytes,
+              totalShardBudgetBytes: 450000000,
               checkpointManifestSchemaVersion: 2,
               generationProvenanceScheme: "rolling-sha256-v1",
               generationProvenanceDigestSha256: $generationProvenanceDigestSha256,
