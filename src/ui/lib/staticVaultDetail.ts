@@ -13,7 +13,10 @@ import { createDbLessD5PublicRelayFetch, normalizedDbLessD5RelayOrigin } from '.
 import { asDbLessCompositeBaseReader } from '../../shared/db-less/current-base-reader'
 import { DbLessCompositeCurrentReader } from '../../shared/db-less/current-composite-reader'
 import { openPublicGithubCurrentOverlay } from '../../shared/db-less/current-overlay-github-public'
-import { readPublicIndexedCurrentTailAfterCheckpoint } from '../../shared/db-less/current-tail-github-public'
+import {
+  readPublicIndexedCurrentTailAfterCheckpoint,
+  readPublicCurrentOnlyTailAfterCheckpoint,
+} from '../../shared/db-less/current-tail-github-public'
 import { buildDbLessCurrentProjectionCanonicalKey } from '../../shared/db-less/current-projection-identity'
 import type { VaultDetailResponse, VaultRecord } from '../types/api'
 
@@ -126,7 +129,13 @@ export function resolveVaultTail(
 
 export async function loadStaticVaultDetail(
   vaultId: string,
-  options: { fetcher?: typeof fetch; now?: () => number; relayOrigin?: string } = {},
+  options: {
+    fetcher?: typeof fetch
+    now?: () => number
+    relayOrigin?: string
+    /** Opt-in D5 qualification only; never enabled by the shipped page. */
+    currentTailReader?: 'indexed-legacy' | 'current-only'
+  } = {},
 ): Promise<StaticVaultDetailRead> {
   if (!/^[A-Fa-f0-9]{64}$/.test(vaultId)) {
     throw new Error('Vault ID must be a 64-digit hexadecimal identifier')
@@ -151,6 +160,9 @@ export async function loadStaticVaultDetail(
     fetcher,
     relayOrigin,
   })
+  const readTail = options.currentTailReader === 'current-only'
+    ? readPublicCurrentOnlyTailAfterCheckpoint
+    : readPublicIndexedCurrentTailAfterCheckpoint
   const [base, tail] = await Promise.all([
     openPublicGithubCurrentBase({
       repository: REPOSITORY,
@@ -158,13 +170,13 @@ export async function loadStaticVaultDetail(
       fetcher,
       relayOrigin,
     }),
-    readPublicIndexedCurrentTailAfterCheckpoint({
+    readTail({
       repository: REPOSITORY,
       channelReleaseTag: D3_CHANNEL,
       checkpoint: overlay.manifest,
       fetcher,
       relayOrigin,
-      maxMutationGenerations: 128,
+      maxMutationGenerations: options.currentTailReader === 'current-only' ? 32 : 128,
     }),
   ])
   if (base.manifest.generationId !== overlay.manifest.baseIdentity) {
