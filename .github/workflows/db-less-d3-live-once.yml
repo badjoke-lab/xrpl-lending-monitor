@@ -18,7 +18,8 @@ jobs:
         github.event.comment.user.login == github.repository_owner &&
         (
           github.event.comment.body == '/d3-live-once' ||
-          github.event.comment.body == '/d3-live-catch-up'
+          github.event.comment.body == '/d3-live-catch-up' ||
+          github.event.comment.body == '/d3-live-current-only-once'
         )
       )
     concurrency:
@@ -99,6 +100,13 @@ jobs:
             chunk_max_records=4096
           fi
 
+          current_only_arg=""
+          # Isolated single-run owner-only proof; all recurring/ordinary
+          # collector invocations remain opt-out.
+          if [ "$GITHUB_EVENT_NAME" = "issue_comment" ] && [ "${{ github.event.comment.body }}" = "/d3-live-current-only-once" ]; then
+            current_only_arg="--enable-current-only-artifact"
+          fi
+
           selected=""
           for max_ledgers in "${limits[@]}"; do
             reduce_width=false
@@ -128,6 +136,7 @@ jobs:
                 --source-revision "$GITHUB_SHA" \
                 --live-repository "$GITHUB_REPOSITORY" \
                 --live-release-prefix "$DATA_RELEASE_PREFIX" \
+                $current_only_arg \
                 --shard-bucket-hours 6 \
                 --shard-max-assets 720 \
                 --shard-max-rotations 24 \
@@ -201,6 +210,10 @@ jobs:
           projected="$(jq -r '.releaseShard.projectedAssets' .local/d3-live/run-summary.json)"
           ceiling="$(jq -r '.releaseShard.maxAssets' .local/d3-live/run-summary.json)"
           test "$shard_fits" = "true"
+          if [ "$GITHUB_EVENT_NAME" = "issue_comment" ] && [ "${{ github.event.comment.body }}" = "/d3-live-current-only-once" ]; then
+            test "$(jq -er '.currentOnlyArtifactEnabled' .local/d3-live/run-summary.json)" = true
+            test "$(jq -er '.currentOnlyArtifactPrepared' .local/d3-live/run-summary.json)" = true
+          fi
           test "$projected" -le "$ceiling"
 
       - name: Create or verify immutable data shard Release
@@ -261,6 +274,34 @@ jobs:
             test "$traversed" -ge 1
             test "$traversed" -le 2
           fi
+
+      - name: Verify exact Current-only publication for isolated owner proof
+        if: >-
+          github.event_name == 'issue_comment' &&
+          github.event.comment.body == '/d3-live-current-only-once'
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=.local/d3-live/run-summary.json
+          test "$(jq -er '.status' "$summary")" = prepared
+          channel="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CHANNEL_RELEASE_TAG" --jq '.body')"
+          key="$(jq -er '.currentProjectionTail.generations[-1].currentOnly.key' <<< "$channel")"
+          sha="$(jq -er '.currentProjectionTail.generations[-1].currentOnly.sha256' <<< "$channel")"
+          bytes="$(jq -er '.currentProjectionTail.generations[-1].currentOnly.bytes' <<< "$channel")"
+          source="$(jq -er '.currentProjectionTail.generations[-1].currentOnly.sourceDeltaManifestSha256' <<< "$channel")"
+          manifest="$(jq -er '.currentProjectionTail.generations[-1].manifestSha256' <<< "$channel")"
+          test "$source" = "$manifest"
+          test "$sha" = "$(jq -er '.currentOnlyArtifactSha256' "$summary")"
+          test "$bytes" = "$(jq -er '.currentOnlyArtifactBytes' "$summary")"
+          test "$bytes" -gt 0
+          test "$bytes" -le 2000000
+          mkdir -p .local/d3-current-only-readback
+          gh release download "$DATA_RELEASE_TAG" --pattern "$key" --dir .local/d3-current-only-readback
+          actual="$(sha256sum ".local/d3-current-only-readback/$key" | awk '{print $1}')"
+          test "$actual" = "$sha"
+          actual_bytes="$(wc -c < ".local/d3-current-only-readback/$key" | tr -d ' ')"
+          test "$actual_bytes" = "$bytes"
+          echo "D3 CURRENT-ONLY LIVE PUBLICATION PASS: $key, $bytes bytes, SHA=$sha" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record one-shot evidence
         if: success()
