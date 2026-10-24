@@ -1,0 +1,21 @@
+name: D5 browser relay client qualification
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -p tsconfig.app.json --noEmit
+      - run: pnpm exec tsc -p tsconfig.worker.json --noEmit
+      - run: pnpm exec vitest run src/shared/db-less/d5-public-release-relay-fetch.test.ts src/ui/lib/staticVaultDetail.test.ts
+      - run: pnpm build:deploy-assets
