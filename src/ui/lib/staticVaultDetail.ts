@@ -9,6 +9,7 @@ import {
 import type { VaultCurrentProjection } from '../../domain/lending/current-projections'
 import type { NormalizedCandidateV1 } from '../../shared/portable-collector-payload'
 import { openPublicGithubCurrentBase } from '../../shared/db-less/current-base-github-release'
+import { createDbLessD5PublicRelayFetch, normalizedDbLessD5RelayOrigin } from '../../shared/db-less/d5-public-release-relay-fetch'
 import { asDbLessCompositeBaseReader } from '../../shared/db-less/current-base-reader'
 import { DbLessCompositeCurrentReader } from '../../shared/db-less/current-composite-reader'
 import { openPublicGithubCurrentOverlay } from '../../shared/db-less/current-overlay-github-public'
@@ -125,28 +126,44 @@ export function resolveVaultTail(
 
 export async function loadStaticVaultDetail(
   vaultId: string,
-  options: { fetcher?: typeof fetch; now?: () => number } = {},
+  options: { fetcher?: typeof fetch; now?: () => number; relayOrigin?: string } = {},
 ): Promise<StaticVaultDetailRead> {
   if (!/^[A-Fa-f0-9]{64}$/.test(vaultId)) {
     throw new Error('Vault ID must be a 64-digit hexadecimal identifier')
   }
   const id = vaultId.toUpperCase()
+  // The static Current UI must never silently fall back to CORS-blocked
+  // GitHub immutable asset URLs; enable it only with a fixed HTTPS relay.
+  const configuredRelayOrigin = options.relayOrigin
+    ?? import.meta.env.VITE_STATIC_RELEASE_RELAY_ORIGIN
+  if (!configuredRelayOrigin && !options.fetcher) {
+    throw new Error('D5 static Vault detail requires a configured verified release relay')
+  }
+  const relayOrigin = configuredRelayOrigin
+    ? normalizedDbLessD5RelayOrigin(configuredRelayOrigin)
+    : undefined
+  const fetcher = options.fetcher ?? createDbLessD5PublicRelayFetch({
+    relayOrigin: relayOrigin!,
+  })
   const overlay = await openPublicGithubCurrentOverlay({
     repository: REPOSITORY,
     channelReleaseTag: D4_CHANNEL,
-    fetcher: options.fetcher,
+    fetcher,
+    relayOrigin,
   })
   const [base, tail] = await Promise.all([
     openPublicGithubCurrentBase({
       repository: REPOSITORY,
       releaseTag: D2_BASE_TAG,
-      fetcher: options.fetcher,
+      fetcher,
+      relayOrigin,
     }),
     readPublicIndexedCurrentTailAfterCheckpoint({
       repository: REPOSITORY,
       channelReleaseTag: D3_CHANNEL,
       checkpoint: overlay.manifest,
-      fetcher: options.fetcher,
+      fetcher,
+      relayOrigin,
       maxMutationGenerations: 128,
     }),
   ])
